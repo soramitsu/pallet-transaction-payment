@@ -110,7 +110,7 @@
 //! 			<Balances<T>>::insert((asset_id, &ACCOUNT_BOB), TOKENS_FIXED_SUPPLY / COUNT_AIRDROP_RECIPIENTS);
 //! 			<TotalSupply<T>>::insert(asset_id, TOKENS_FIXED_SUPPLY);
 //!
-//! 			Self::deposit_event(RawEvent::Issued(asset_id, sender, TOKENS_FIXED_SUPPLY));
+//! 			Self::deposit_event(Event::Issued(asset_id, sender, TOKENS_FIXED_SUPPLY));
 //! 			Ok(())
 //! 		}
 //! 	}
@@ -133,28 +133,39 @@
 // Ensure we're `no_std` when compiling for Wasm.
 #![cfg_attr(not(feature = "std"), no_std)]
 
-use frame_support::{Parameter, decl_module, decl_event, decl_storage, decl_error, ensure};
-use sp_runtime::traits::{Member, AtLeast32Bit, AtLeast32BitUnsigned, Zero, StaticLookup};
-use frame_system::ensure_signed;
+use frame_support::{StorageMap, ensure};
+use sp_runtime::traits::{AtLeast32Bit, AtLeast32BitUnsigned, Zero, StaticLookup};
 use sp_runtime::traits::One;
 
-/// The module configuration trait.
-pub trait Trait: frame_system::Trait {
-	/// The overarching event type.
-	type Event: From<Event<Self>> + Into<<Self as frame_system::Trait>::Event>;
+pub use pallet::*;
+#[frame_support::pallet(Assets)]
+mod pallet {
+	use frame_support::pallet_prelude::*;
+	use frame_system::pallet_prelude::*;
+	use super::*;
 
-	/// The units in which we record balances.
-	type Balance: Member + Parameter + AtLeast32BitUnsigned + Default + Copy;
+	/// The module configuration trait.
+	#[pallet::trait_]
+	pub trait Trait: frame_system::Trait {
+		/// The overarching event type.
+		type Event: From<Event<Self>> + IsType<<Self as frame_system::Trait>::Event>;
 
-	/// The arithmetic type of asset identifier.
-	type AssetId: Parameter + AtLeast32Bit + Default + Copy;
-}
+		/// The units in which we record balances.
+		type Balance: Member + Parameter + AtLeast32BitUnsigned + Default + Copy;
 
-decl_module! {
-	pub struct Module<T: Trait> for enum Call where origin: T::Origin {
-		type Error = Error<T>;
+		/// The arithmetic type of asset identifier.
+		type AssetId: Parameter + AtLeast32Bit + Default + Copy;
+	}
 
-		fn deposit_event() = default;
+	#[pallet::module]
+	#[pallet::generate(fn deposit_event)]
+	pub struct Module<T>(PhantomData<T>);
+
+	#[pallet::module_interface]
+	impl<T: Trait> ModuleInterface<BlockNumberFor<T>> for Module<T> {}
+
+	#[pallet::call]
+	impl<T: Trait> Call for Module<T> {
 		/// Issue a new class of fungible assets. There are, and will only ever be, `total`
 		/// such assets and they'll all belong to the `origin` initially. It will have an
 		/// identifier `AssetId` instance: this will be specified in the `Issued` event.
@@ -165,8 +176,11 @@ decl_module! {
 		/// - 2 storage writes (condec `O(1)`).
 		/// - 1 event.
 		/// # </weight>
-		#[weight = 0]
-		fn issue(origin, #[compact] total: T::Balance) {
+		#[pallet::weight(0)]
+		pub(crate) fn issue(
+			origin: OriginFor<T>,
+			#[pallet::compact] total: T::Balance
+		) -> DispatchResultWithPostInfo {
 			let origin = ensure_signed(origin)?;
 
 			let id = Self::next_asset_id();
@@ -175,7 +189,9 @@ decl_module! {
 			<Balances<T>>::insert((id, &origin), total);
 			<TotalSupply<T>>::insert(id, total);
 
-			Self::deposit_event(RawEvent::Issued(id, origin, total));
+			Self::deposit_event(Event::Issued(id, origin, total));
+
+			Ok(().into())
 		}
 
 		/// Move some assets from one holder to another.
@@ -186,12 +202,12 @@ decl_module! {
 		/// - 2 storage mutations (codec `O(1)`).
 		/// - 1 event.
 		/// # </weight>
-		#[weight = 0]
-		fn transfer(origin,
-			#[compact] id: T::AssetId,
+		#[pallet::weight(0)]
+		pub(crate) fn transfer(origin: OriginFor<T>,
+			#[pallet::compact] id: T::AssetId,
 			target: <T::Lookup as StaticLookup>::Source,
-			#[compact] amount: T::Balance
-		) {
+			#[pallet::compact] amount: T::Balance
+		) -> DispatchResultWithPostInfo {
 			let origin = ensure_signed(origin)?;
 			let origin_account = (id, origin.clone());
 			let origin_balance = <Balances<T>>::get(&origin_account);
@@ -199,9 +215,11 @@ decl_module! {
 			ensure!(!amount.is_zero(), Error::<T>::AmountZero);
 			ensure!(origin_balance >= amount, Error::<T>::BalanceLow);
 
-			Self::deposit_event(RawEvent::Transferred(id, origin, target.clone(), amount));
+			Self::deposit_event(Event::Transferred(id, origin, target.clone(), amount));
 			<Balances<T>>::insert(origin_account, origin_balance - amount);
 			<Balances<T>>::mutate((id, target), |balance| *balance += amount);
+
+			Ok(().into())
 		}
 
 		/// Destroy any assets of `id` owned by `origin`.
@@ -212,35 +230,34 @@ decl_module! {
 		/// - 1 storage deletion (codec `O(1)`).
 		/// - 1 event.
 		/// # </weight>
-		#[weight = 0]
-		fn destroy(origin, #[compact] id: T::AssetId) {
+		#[pallet::weight(0)]
+		pub(crate) fn destroy(
+			origin: OriginFor<T>,
+			#[pallet::compact] id: T::AssetId
+		) -> DispatchResultWithPostInfo {
 			let origin = ensure_signed(origin)?;
 			let balance = <Balances<T>>::take((id, &origin));
 			ensure!(!balance.is_zero(), Error::<T>::BalanceZero);
 
 			<TotalSupply<T>>::mutate(id, |total_supply| *total_supply -= balance);
-			Self::deposit_event(RawEvent::Destroyed(id, origin, balance));
+			Self::deposit_event(Event::Destroyed(id, origin, balance));
+
+			Ok(().into())
 		}
 	}
-}
 
-decl_event! {
-	pub enum Event<T> where
-		<T as frame_system::Trait>::AccountId,
-		<T as Trait>::Balance,
-		<T as Trait>::AssetId,
-	{
+	#[pallet::event]
+	pub enum Event<T: Trait> {
 		/// Some assets were issued. \[asset_id, owner, total_supply\]
-		Issued(AssetId, AccountId, Balance),
+		Issued(T::AssetId, T::AccountId, T::Balance),
 		/// Some assets were transferred. \[asset_id, from, to, amount\]
-		Transferred(AssetId, AccountId, AccountId, Balance),
+		Transferred(T::AssetId, T::AccountId, T::AccountId, T::Balance),
 		/// Some assets were destroyed. \[asset_id, owner, balance\]
-		Destroyed(AssetId, AccountId, Balance),
+		Destroyed(T::AssetId, T::AccountId, T::Balance),
 	}
-}
 
-decl_error! {
-	pub enum Error for Module<T: Trait> {
+	#[pallet::error]
+	pub enum Error<T> {
 		/// Transfer amount should be non-zero
 		AmountZero,
 		/// Account balance must be greater than or equal to the transfer amount
@@ -248,19 +265,22 @@ decl_error! {
 		/// Balance should be non-zero
 		BalanceZero,
 	}
-}
 
-decl_storage! {
-	trait Store for Module<T: Trait> as Assets {
-		/// The number of units of assets held by any given account.
-		Balances: map hasher(blake2_128_concat) (T::AssetId, T::AccountId) => T::Balance;
-		/// The next asset identifier up for grabs.
-		NextAssetId get(fn next_asset_id): T::AssetId;
-		/// The total unit supply of an asset.
-		///
-		/// TWOX-NOTE: `AssetId` is trusted, so this is safe.
-		TotalSupply: map hasher(twox_64_concat) T::AssetId => T::Balance;
-	}
+	/// The number of units of assets held by any given account.
+	#[pallet::storage]
+	pub(crate) type Balances<T: Trait> =
+		StorageMapType<_, Blake2_128Concat, (T::AssetId, T::AccountId), T::Balance, ValueQuery>;
+
+	/// The next asset identifier up for grabs.
+	#[pallet::storage]
+	#[pallet::generate_getter(fn next_asset_id)]
+	pub(crate) type NextAssetId<T: Trait> = StorageValueType<_, T::AssetId, ValueQuery>;
+
+	/// The total unit supply of an asset.
+	///
+	/// TWOX-NOTE: `AssetId` is trusted, so this is safe.
+	#[pallet::storage]
+	pub(crate) type TotalSupply<T: Trait> = StorageMapType<_, Twox64Concat, T::AssetId, T::Balance, ValueQuery>;
 }
 
 // The main implementation block for the module.
