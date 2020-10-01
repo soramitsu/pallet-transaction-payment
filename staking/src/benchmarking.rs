@@ -20,9 +20,11 @@
 use super::*;
 use crate::Module as Staking;
 use testing_utils::*;
+use mock::{Tokens, VAL_TOKEN_ID};
 
 use sp_runtime::traits::One;
 use frame_system::RawOrigin;
+use frame_support::traits::Imbalance;
 pub use frame_benchmarking::{benchmarks, account};
 const SEED: u32 = 0;
 const MAX_SPANS: u32 = 100;
@@ -96,7 +98,7 @@ pub fn create_validator_with_nominators<T: Trait>(
 	ErasRewardPoints::<T>::insert(current_era, reward);
 
 	// Create reward pool
-	let total_payout = T::Currency::minimum_balance() * 1000.into();
+	let total_payout: MultiCurrencyBalanceOf<T> = 1000.into();
 	<ErasValidatorReward<T>>::insert(current_era, total_payout);
 
 	Ok(v_stash)
@@ -113,7 +115,7 @@ benchmarks! {
 		let stash = create_funded_user::<T>("stash", u, 100);
 		let controller = create_funded_user::<T>("controller", u, 100);
 		let controller_lookup: <T::Lookup as StaticLookup>::Source = T::Lookup::unlookup(controller.clone());
-		let reward_destination = RewardDestination::Staked;
+		let reward_destination = RewardDestination::Stash;
 		let amount = T::Currency::minimum_balance() * 10.into();
 	}: _(RawOrigin::Signed(stash.clone()), controller_lookup, amount, reward_destination)
 	verify {
@@ -208,7 +210,7 @@ benchmarks! {
 	set_payee {
 		let u in ...;
 		let (stash, controller) = create_stash_controller::<T>(u, 100)?;
-		assert_eq!(Payee::<T>::get(&stash), RewardDestination::Staked);
+		assert_eq!(Payee::<T>::get(&stash), RewardDestination::Stash);
 	}: _(RawOrigin::Signed(controller), RewardDestination::Controller)
 	verify {
 		assert_eq!(Payee::<T>::get(&stash), RewardDestination::Controller);
@@ -283,11 +285,11 @@ benchmarks! {
 
 		let current_era = CurrentEra::get().unwrap();
 		let caller = account("caller", 0, SEED);
-		let balance_before = T::Currency::free_balance(&validator);
+		let balance_before = T::MultiCurrency::free_balance(T::ValTokenId::get(), &validator);
 	}: _(RawOrigin::Signed(caller), validator.clone(), current_era)
 	verify {
 		// Validator has been paid!
-		let balance_after = T::Currency::free_balance(&validator);
+		let balance_after = T::MultiCurrency::free_balance(T::ValTokenId::get(), &validator);
 		assert!(balance_before < balance_after);
 	}
 
@@ -297,11 +299,11 @@ benchmarks! {
 
 		let current_era = CurrentEra::get().unwrap();
 		let caller = account("caller", 0, SEED);
-		let balance_before = T::Currency::free_balance(&validator);
+		let balance_before = T::MultiCurrency::free_balance(T::ValTokenId::get(), &validator);
 	}: payout_stakers(RawOrigin::Signed(caller), validator.clone(), current_era)
 	verify {
 		// Validator has been paid!
-		let balance_after = T::Currency::free_balance(&validator);
+		let balance_after = T::MultiCurrency::free_balance(T::ValTokenId::get(), &validator);
 		assert!(balance_before < balance_after);
 	}
 
@@ -333,7 +335,7 @@ benchmarks! {
 			<ErasStakers<T>>::insert(i, T::AccountId::default(), Exposure::<T::AccountId, BalanceOf<T>>::default());
 			<ErasStakersClipped<T>>::insert(i, T::AccountId::default(), Exposure::<T::AccountId, BalanceOf<T>>::default());
 			<ErasValidatorPrefs<T>>::insert(i, T::AccountId::default(), ValidatorPrefs::default());
-			<ErasValidatorReward<T>>::insert(i, BalanceOf::<T>::one());
+			<ErasValidatorReward<T>>::insert(i, MultiCurrencyBalanceOf::<T>::one());
 			<ErasRewardPoints<T>>::insert(i, EraRewardPoints::<T::AccountId>::default());
 			<ErasTotalStake<T>>::insert(i, BalanceOf::<T>::one());
 			ErasStartSessionIndex::insert(i, i);
@@ -419,7 +421,7 @@ benchmarks! {
 		ErasRewardPoints::<T>::insert(current_era, reward);
 
 		// Create reward pool
-		let total_payout = T::Currency::minimum_balance() * 1000.into();
+		let total_payout: MultiCurrencyBalanceOf<T> = 1000.into();
 		<ErasValidatorReward<T>>::insert(current_era, total_payout);
 
 		let caller: T::AccountId = account("caller", 0, SEED);
@@ -625,7 +627,7 @@ benchmarks! {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::mock::{ExtBuilder, Test, Balances, Staking, Origin};
+	use crate::mock::{ExtBuilder, Test, Balances, Staking, Origin, VAL_TOKEN_ID, Tokens};
 	use frame_support::assert_ok;
 
 	#[test]
@@ -658,9 +660,9 @@ mod tests {
 
 			let current_era = CurrentEra::get().unwrap();
 
-			let original_free_balance = Balances::free_balance(&validator_stash);
+			let original_free_balance = Tokens::free_balance(VAL_TOKEN_ID, &validator_stash);
 			assert_ok!(Staking::payout_stakers(Origin::signed(1337), validator_stash, current_era));
-			let new_free_balance = Balances::free_balance(&validator_stash);
+			let new_free_balance = Tokens::free_balance(VAL_TOKEN_ID, &validator_stash);
 
 			assert!(original_free_balance < new_free_balance);
 		});

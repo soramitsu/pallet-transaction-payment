@@ -38,3 +38,6 @@ std = [
 	"sp-io/std",
 	"sp-core/std",
 ]
+dev-std = [
+	"pallet-balances/std",
+]

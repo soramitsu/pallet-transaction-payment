@@ -1,4 +1,5 @@
 [workspace]
 members = [
-    "transaction-payment"
+    "transaction-payment",
+    "staking",
 ]
