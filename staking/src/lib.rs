@@ -297,17 +297,16 @@ use frame_support::{
 		WithPostDispatchInfo,
 	},
 	traits::{
-		Currency, LockIdentifier, LockableCurrency, WithdrawReasons, OnUnbalanced, Imbalance, Get,
+		Currency, LockIdentifier, LockableCurrency, WithdrawReasons, OnUnbalanced, Get,
 		UnixTime, EstimateNextNewSession, EnsureOrigin,
 	}
 };
 use pallet_session::historical;
 use sp_runtime::{
 	Percent, Perbill, PerU16, PerThing, RuntimeDebug, DispatchError,
-	curve::PiecewiseLinear,
 	traits::{
 		Convert, Zero, StaticLookup, CheckedSub, Saturating, SaturatedConversion,
-		AtLeast32BitUnsigned, Dispatchable,
+		AtLeast32BitUnsigned, Dispatchable, UniqueSaturatedInto
 	},
 	transaction_validity::{
 		TransactionValidityError, TransactionValidity, ValidTransaction, InvalidTransaction,
@@ -329,6 +328,10 @@ use sp_npos_elections::{
 	build_support_map, evaluate_support, seq_phragmen, generate_compact_solution_type,
 	is_score_better, VotingLimit, SupportMap, VoteWeight,
 };
+use core::time::Duration;
+use traits::{
+	MultiCurrency, MultiCurrencyExtended, MultiLockableCurrency
+};
 
 const DEFAULT_MINIMUM_VALIDATOR_COUNT: u32 = 4;
 const STAKING_ID: LockIdentifier = *b"staking ";
@@ -347,6 +350,17 @@ macro_rules! log {
 		)
 	};
 }
+
+/// CurrencyId type for MultiCurrency.
+type MultiCurrencyIdOf<T> =
+    <<T as Trait>::MultiCurrency as MultiCurrency<<T as frame_system::Trait>::AccountId>>::CurrencyId;
+
+/// Amount type for MultiCurrency.
+type MultiCurrencyAmountOf<T> =
+	<<T as Trait>::MultiCurrency as MultiCurrencyExtended<<T as frame_system::Trait>::AccountId>>::Amount;
+	
+/// The balance type for MultiCurrency.
+pub type MultiCurrencyBalanceOf<T> = <<T as Trait>::MultiCurrency as MultiCurrency<<T as frame_system::Trait>::AccountId>>::Balance;
 
 /// Data type used to index nominators in the compact type
 pub type NominatorIndex = u32;
@@ -390,16 +404,15 @@ pub type ChainAccuracy = Perbill;
 pub type OffchainAccuracy = PerU16;
 
 /// The balance type of this module.
-pub type BalanceOf<T> =
-	<<T as Trait>::Currency as Currency<<T as frame_system::Trait>::AccountId>>::Balance;
+pub type BalanceOf<T> = <<T as Trait>::Currency as Currency<<T as frame_system::Trait>::AccountId>>::Balance;
 
 /// The compact type for election solutions.
 pub type CompactAssignments =
 	GenericCompactAssignments<NominatorIndex, ValidatorIndex, OffchainAccuracy>;
 
-type PositiveImbalanceOf<T> =
+pub type PositiveImbalanceOf<T> =
 	<<T as Trait>::Currency as Currency<<T as frame_system::Trait>::AccountId>>::PositiveImbalance;
-type NegativeImbalanceOf<T> =
+pub type NegativeImbalanceOf<T> =
 	<<T as Trait>::Currency as Currency<<T as frame_system::Trait>::AccountId>>::NegativeImbalance;
 
 /// Reward points of an era. Used to split era total payout between validators.
@@ -428,8 +441,6 @@ pub enum StakerStatus<AccountId> {
 /// A destination account for payment.
 #[derive(PartialEq, Eq, Copy, Clone, Encode, Decode, RuntimeDebug)]
 pub enum RewardDestination {
-	/// Pay into the stash account, increasing the amount at stake accordingly.
-	Staked,
 	/// Pay into the stash account, not increasing the amount at stake.
 	Stash,
 	/// Pay into the controller account.
@@ -438,7 +449,7 @@ pub enum RewardDestination {
 
 impl Default for RewardDestination {
 	fn default() -> Self {
-		RewardDestination::Staked
+		RewardDestination::Stash
 	}
 }
 
@@ -891,9 +902,44 @@ impl WeightInfo for () {
 	fn submit_solution_weaker(_v: u32, _n: u32, ) -> Weight { 1_000_000_000 }
 }
 
+pub struct ValRewardCurve {
+	/// The time it will take for the reward to reach `MinValBurnedPercentageReward` 
+	/// from `MaxValBurnedPercentageReward` and flatline there.
+	pub duration_to_reward_flatline: Duration,
+
+	/// Minimum percentage of the VAL burned in the active era, that can be used as a reward pool.
+	pub min_val_burned_percentage_reward: Percent,
+
+	/// Maximum percentage of the VAL burned in the active era, that can be used as a reward pool.
+	pub max_val_burned_percentage_reward: Percent,
+}
+
+impl ValRewardCurve {
+	pub fn current_reward_percentage(&self, duration_since_genesis: Duration) -> f64 {
+		let min_val_burned_percentage: f64 = self.min_val_burned_percentage_reward.deconstruct() as f64 / 100f64;
+		let max_val_burned_percentage: f64 = self.max_val_burned_percentage_reward.deconstruct() as f64 / 100f64;
+		if duration_since_genesis >= self.duration_to_reward_flatline {
+			min_val_burned_percentage
+		} else {
+			max_val_burned_percentage 
+				- (max_val_burned_percentage - min_val_burned_percentage)
+				* duration_since_genesis.as_secs_f64() / self.duration_to_reward_flatline.as_secs_f64()
+		}
+	}
+}
+
 pub trait Trait: frame_system::Trait + SendTransactionTypes<Call<Self>> {
-	/// The staking balance.
+	/// The native currency - XOR.
 	type Currency: LockableCurrency<Self::AccountId, Moment=Self::BlockNumber>;
+
+	/// The multicurrency to use VAL.
+	type MultiCurrency: MultiCurrencyExtended<Self::AccountId> + MultiLockableCurrency<Self::AccountId, Moment = Self::BlockNumber>;
+
+	/// The multicurrency id of the VAL token.
+	type ValTokenId: Get<MultiCurrencyIdOf<Self>>;
+
+	/// The configured reward curve for stakers.
+	type ValRewardCurve: Get<ValRewardCurve>;
 
 	/// Time used for computing era duration.
 	///
@@ -908,18 +954,12 @@ pub trait Trait: frame_system::Trait + SendTransactionTypes<Call<Self>> {
 	/// [`BalanceOf`].
 	type CurrencyToVote: Convert<BalanceOf<Self>, VoteWeight> + Convert<u128, BalanceOf<Self>>;
 
-	/// Tokens have been minted and are unused for validator-reward.
-	/// See [Era payout](./index.html#era-payout).
-	type RewardRemainder: OnUnbalanced<NegativeImbalanceOf<Self>>;
-
 	/// The overarching event type.
 	type Event: From<Event<Self>> + Into<<Self as frame_system::Trait>::Event>;
 
 	/// Handler for the unbalanced reduction when slashing a staker.
 	type Slash: OnUnbalanced<NegativeImbalanceOf<Self>>;
 
-	/// Handler for the unbalanced increment when rewarding a staker.
-	type Reward: OnUnbalanced<PositiveImbalanceOf<Self>>;
 
 	/// Number of sessions per era.
 	type SessionsPerEra: Get<SessionIndex>;
@@ -938,10 +978,6 @@ pub trait Trait: frame_system::Trait + SendTransactionTypes<Call<Self>> {
 
 	/// Interface for interacting with a session module.
 	type SessionInterface: self::SessionInterface<Self::AccountId>;
-
-	/// The NPoS reward curve used to define yearly inflation.
-	/// See [Era payout](./index.html#era-payout).
-	type RewardCurve: Get<&'static PiecewiseLinear<'static>>;
 
 	/// Something that can estimate the next session change, accurately or as a best effort guess.
 	type NextNewSession: EstimateNextNewSession<Self::BlockNumber>;
@@ -1027,6 +1063,9 @@ decl_storage! {
 		/// always be in history. I.e. `active_era > current_era - history_depth` must be
 		/// guaranteed.
 		HistoryDepth get(fn history_depth) config(): u32 = 84;
+
+		/// The time span since genesis, incremented at the end of each era. 
+		pub TimeSinceGenesis get(fn time_since_genesis): Duration;
 
 		/// The ideal number of staking participants.
 		pub ValidatorCount get(fn validator_count) config(): u32;
@@ -1114,12 +1153,15 @@ decl_storage! {
 		///
 		/// Eras that haven't finished yet or has been removed doesn't have reward.
 		pub ErasValidatorReward get(fn eras_validator_reward):
-			map hasher(twox_64_concat) EraIndex => Option<BalanceOf<T>>;
+			map hasher(twox_64_concat) EraIndex => Option<MultiCurrencyBalanceOf<T>>;
 
 		/// Rewards for the last `HISTORY_DEPTH` eras.
 		/// If reward hasn't been set or has been removed then 0 reward is returned.
 		pub ErasRewardPoints get(fn eras_reward_points):
 			map hasher(twox_64_concat) EraIndex => EraRewardPoints<T::AccountId>;
+		
+		/// The amount of VAL burned during this era.
+		pub EraValBurned get(fn era_val_burned): MultiCurrencyBalanceOf<T> = MultiCurrencyBalanceOf::<T>::zero();
 
 		/// The total amount staked for the last `HISTORY_DEPTH` eras.
 		/// If total hasn't been set or has been removed then 0 stake is returned.
@@ -1214,7 +1256,7 @@ decl_storage! {
 					T::Origin::from(Some(stash.clone()).into()),
 					T::Lookup::unlookup(controller.clone()),
 					balance,
-					RewardDestination::Staked,
+					RewardDestination::Stash,
 				);
 				let _ = match status {
 					StakerStatus::Validator => {
@@ -1236,13 +1278,13 @@ decl_storage! {
 }
 
 decl_event!(
-	pub enum Event<T> where Balance = BalanceOf<T>, <T as frame_system::Trait>::AccountId {
+	pub enum Event<T> where Balance = BalanceOf<T>, MultiCurrencyBalance = MultiCurrencyBalanceOf<T>, <T as frame_system::Trait>::AccountId {
 		/// The era payout has been set; the first balance is the validator-payout; the second is
 		/// the remainder from the maximum amount of reward.
-		/// [era_index, validator_payout, remainder]
-		EraPayout(EraIndex, Balance, Balance),
+		/// [era_index, validator_payout]
+		EraPayout(EraIndex, MultiCurrencyBalance),
 		/// The staker has been rewarded by this amount. [stash, amount]
-		Reward(AccountId, Balance),
+		Reward(AccountId, MultiCurrencyBalance),
 		/// One validator (and its nominators) has been slashed by the given amount.
 		/// [validator, amount]
 		Slash(AccountId, Balance),
@@ -2293,6 +2335,12 @@ decl_module! {
 }
 
 impl<T: Trait> Module<T> {
+	/// Notify the pallet that this `amount` of VAL token was burned.
+	pub fn notify_val_burned(amount: MultiCurrencyBalanceOf<T>) {
+		let total_val_burned: MultiCurrencyBalanceOf<T> = EraValBurned::<T>::get() + amount;
+		EraValBurned::<T>::put(total_val_burned);
+	}
+
 	/// The total balance that can be slashed from a stash account as of right now.
 	pub fn slashable_balance_of(stash: &T::AccountId) -> BalanceOf<T> {
 		// Weight note: consider making the stake accessible through stash.
@@ -2364,8 +2412,8 @@ impl<T: Trait> Module<T> {
 
 		// Note: if era has no reward to be claimed, era may be future. better not to update
 		// `ledger.claimed_rewards` in this case.
-		let era_payout = <ErasValidatorReward<T>>::get(&era)
-			.ok_or_else(|| Error::<T>::InvalidEraToReward)?;
+		let era_payout: u128 = <ErasValidatorReward<T>>::get(&era)
+			.ok_or_else(|| Error::<T>::InvalidEraToReward)?.unique_saturated_into();
 
 		let controller = Self::bonded(&validator_stash).ok_or(Error::<T>::NotStash)?;
 		let mut ledger = <Ledger<T>>::get(&controller).ok_or_else(|| Error::<T>::NotController)?;
@@ -2424,9 +2472,9 @@ impl<T: Trait> Module<T> {
 		// We can now make total validator payout:
 		if let Some(imbalance) = Self::make_payout(
 			&ledger.stash,
-			validator_staking_payout + validator_commission_payout
+			(validator_staking_payout + validator_commission_payout).unique_saturated_into()
 		) {
-			Self::deposit_event(RawEvent::Reward(ledger.stash, imbalance.peek()));
+			Self::deposit_event(RawEvent::Reward(ledger.stash, imbalance));
 		}
 
 		// Lets now calculate how this is split to the nominators.
@@ -2437,10 +2485,11 @@ impl<T: Trait> Module<T> {
 				exposure.total,
 			);
 
-			let nominator_reward: BalanceOf<T> = nominator_exposure_part * validator_leftover_payout;
+			let nominator_reward = nominator_exposure_part * validator_leftover_payout;
 			// We can now make nominator payout:
-			if let Some(imbalance) = Self::make_payout(&nominator.who, nominator_reward) {
-				Self::deposit_event(RawEvent::Reward(nominator.who.clone(), imbalance.peek()));
+			if let Some(imbalance) = Self::make_payout(&nominator.who,
+				 nominator_reward.unique_saturated_into()) {
+				Self::deposit_event(RawEvent::Reward(nominator.who.clone(), imbalance));
 			}
 		}
 
@@ -2470,24 +2519,15 @@ impl<T: Trait> Module<T> {
 
 	/// Actually make a payment to a staker. This uses the currency's reward function
 	/// to pay the right payee for the given staker account.
-	fn make_payout(stash: &T::AccountId, amount: BalanceOf<T>) -> Option<PositiveImbalanceOf<T>> {
+	fn make_payout(stash: &T::AccountId, amount: MultiCurrencyBalanceOf<T>) -> Option<MultiCurrencyBalanceOf<T>> {
 		let dest = Self::payee(stash);
 		match dest {
 			RewardDestination::Controller => Self::bonded(stash)
 				.and_then(|controller|
-					Some(T::Currency::deposit_creating(&controller, amount))
+					T::MultiCurrency::deposit(T::ValTokenId::get(), &controller, amount).ok().map(|_| amount)
 				),
 			RewardDestination::Stash =>
-				T::Currency::deposit_into_existing(stash, amount).ok(),
-			RewardDestination::Staked => Self::bonded(stash)
-				.and_then(|c| Self::ledger(&c).map(|l| (c, l)))
-				.and_then(|(controller, mut l)| {
-					l.active += amount;
-					l.total += amount;
-					let r = T::Currency::deposit_into_existing(stash, amount).ok();
-					Self::update_ledger(&controller, &l);
-					r
-				}),
+				T::MultiCurrency::deposit(T::ValTokenId::get(), stash, amount).ok().map(|_| amount),
 		}
 	}
 
@@ -2814,25 +2854,20 @@ impl<T: Trait> Module<T> {
 
 	/// Compute payout for era.
 	fn end_era(active_era: ActiveEraInfo, _session_index: SessionIndex) {
+		// This era reward percentage = 90% - (90% - 35%) * time passed after start / 5 years 
 		// Note: active_era_start can be None if end era is called during genesis config.
 		if let Some(active_era_start) = active_era.start {
-			let now_as_millis_u64 = T::UnixTime::now().as_millis().saturated_into::<u64>();
+			let time_since_genesis = TimeSinceGenesis::get() 
+				+ Duration::from_millis(T::UnixTime::now().as_millis().saturated_into::<u64>() - active_era_start);
+			TimeSinceGenesis::put(time_since_genesis);
+			let val_burned_percentage = T::ValRewardCurve::get().current_reward_percentage(time_since_genesis);
+			let era_val_burned: u128 = EraValBurned::<T>::get().unique_saturated_into();
+			let validator_payout: MultiCurrencyBalanceOf<T> = ((era_val_burned as f64 * val_burned_percentage) as u128).unique_saturated_into();
 
-			let era_duration = now_as_millis_u64 - active_era_start;
-			let (validator_payout, max_payout) = inflation::compute_total_payout(
-				&T::RewardCurve::get(),
-				Self::eras_total_stake(&active_era.index),
-				T::Currency::total_issuance(),
-				// Duration of era; more than u64::MAX is rewarded as u64::MAX.
-				era_duration.saturated_into::<u64>(),
-			);
-			let rest = max_payout.saturating_sub(validator_payout);
-
-			Self::deposit_event(RawEvent::EraPayout(active_era.index, validator_payout, rest));
+			Self::deposit_event(RawEvent::EraPayout(active_era.index, validator_payout));
 
 			// Set ending era reward.
 			<ErasValidatorReward<T>>::insert(&active_era.index, validator_payout);
-			T::RewardRemainder::on_unbalanced(T::Currency::issue(rest));
 		}
 	}
 

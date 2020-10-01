@@ -18,8 +18,7 @@
 //! Test utilities
 
 use std::{collections::HashSet, cell::RefCell};
-use sp_runtime::Perbill;
-use sp_runtime::curve::PiecewiseLinear;
+use sp_runtime::{Perbill, Percent};
 use sp_runtime::traits::{IdentityLookup, Convert, SaturatedConversion, Zero};
 use sp_runtime::testing::{Header, UintAuthorityId, TestXt};
 use sp_staking::{SessionIndex, offence::{OffenceDetails, OnOffenceHandler}};
@@ -36,14 +35,17 @@ use sp_npos_elections::{
 	VoteWeight,
 };
 use crate::*;
+use core::time::Duration;
 
 pub const INIT_TIMESTAMP: u64 = 30_000;
+pub const VAL_TOKEN_ID: u32 = 1;
 
 /// The AccountId alias in this test module.
 pub(crate) type AccountId = u64;
 pub(crate) type AccountIndex = u64;
 pub(crate) type BlockNumber = u64;
 pub(crate) type Balance = u128;
+pub(crate) type Amount = i128;
 
 /// Simple structure that exposes how u64 currency can be represented as... u64.
 pub struct CurrencyToVoteHandler;
@@ -176,6 +178,7 @@ impl_outer_event! {
 		balances<T>,
 		session,
 		staking<T>,
+		tokens<T>,
 	}
 }
 
@@ -276,53 +279,44 @@ impl pallet_timestamp::Trait for Test {
 	type MinimumPeriod = MinimumPeriod;
 	type WeightInfo = ();
 }
-pallet_staking_reward_curve::build! {
-	const I_NPOS: PiecewiseLinear<'static> = curve!(
-		min_inflation: 0_025_000,
-		max_inflation: 0_100_000,
-		ideal_stake: 0_500_000,
-		falloff: 0_050_000,
-		max_piece_count: 40,
-		test_precision: 0_005_000,
-	);
+
+type CurrencyId = u32;
+
+impl tokens::Trait for Test {
+    type Event = MetaEvent;
+    type Balance = Balance;
+    type Amount = Amount;
+    type CurrencyId = CurrencyId;
+    type OnReceived = ();
 }
+
 parameter_types! {
 	pub const BondingDuration: EraIndex = 3;
-	pub const RewardCurve: &'static PiecewiseLinear<'static> = &I_NPOS;
 	pub const MaxNominatorRewardedPerValidator: u32 = 64;
 	pub const UnsignedPriority: u64 = 1 << 20;
 	pub const MinSolutionScoreBump: Perbill = Perbill::zero();
-}
-
-thread_local! {
-	pub static REWARD_REMAINDER_UNBALANCED: RefCell<u128> = RefCell::new(0);
-}
-
-pub struct RewardRemainderMock;
-
-impl OnUnbalanced<NegativeImbalanceOf<Test>> for RewardRemainderMock {
-	fn on_nonzero_unbalanced(amount: NegativeImbalanceOf<Test>) {
-		REWARD_REMAINDER_UNBALANCED.with(|v| {
-			*v.borrow_mut() += amount.peek();
-		});
-		drop(amount);
-	}
+	pub const ValTokenId: u32 = VAL_TOKEN_ID;
+	pub const TestValRewardCurve: ValRewardCurve = ValRewardCurve {
+		duration_to_reward_flatline: Duration::from_millis(100_000),
+		min_val_burned_percentage_reward: Percent::from_percent(35),
+		max_val_burned_percentage_reward: Percent::from_percent(90),
+	};
 }
 
 impl Trait for Test {
 	type Currency = Balances;
+	type MultiCurrency = Tokens; 
+	type ValTokenId = ValTokenId;
+	type ValRewardCurve = TestValRewardCurve;
 	type UnixTime = Timestamp;
 	type CurrencyToVote = CurrencyToVoteHandler;
-	type RewardRemainder = RewardRemainderMock;
 	type Event = MetaEvent;
 	type Slash = ();
-	type Reward = ();
 	type SessionsPerEra = SessionsPerEra;
 	type SlashDeferDuration = SlashDeferDuration;
 	type SlashCancelOrigin = frame_system::EnsureRoot<Self::AccountId>;
 	type BondingDuration = BondingDuration;
 	type SessionInterface = Self;
-	type RewardCurve = RewardCurve;
 	type NextNewSession = Session;
 	type ElectionLookahead = ElectionLookahead;
 	type Call = Call;
@@ -554,6 +548,7 @@ pub type Balances = pallet_balances::Module<Test>;
 pub type Session = pallet_session::Module<Test>;
 pub type Timestamp = pallet_timestamp::Module<Test>;
 pub type Staking = Module<Test>;
+pub type Tokens = tokens::Module<Test>;
 
 pub(crate) fn current_era() -> EraIndex {
 	Staking::current_era().unwrap()
@@ -711,13 +706,9 @@ pub(crate) fn start_era(era_index: EraIndex) {
 	assert_eq!(Staking::active_era().unwrap().index, era_index);
 }
 
-pub(crate) fn current_total_payout_for_duration(duration: u64) -> Balance {
-	inflation::compute_total_payout(
-		<Test as Trait>::RewardCurve::get(),
-		Staking::eras_total_stake(Staking::active_era().unwrap().index),
-		Balances::total_issuance(),
-		duration,
-	).0
+pub(crate) fn current_total_payout(duration_since_genesis: Duration, era_val_burned: Balance) -> Balance {
+	let val_burned_percentage = <Test as Trait>::ValRewardCurve::get().current_reward_percentage(duration_since_genesis);
+	(era_val_burned as f64 * val_burned_percentage) as u128
 }
 
 pub(crate) fn reward_all_elected() {

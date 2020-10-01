@@ -194,8 +194,11 @@ fn rewards_should_work() {
 		// This is the second validator of the current elected set.
 		<Module<Test>>::reward_by_ids(vec![(21, 50)]);
 
+		// Assume that 1000 val was burned as transaction fees.
+		<Staking as crate::Store>::EraValBurned::put(1000);
+
 		// Compute total payout now for whole duration as other parameter won't change
-		let total_payout_0 = current_total_payout_for_duration(3 * 1000);
+		let total_payout_0 = current_total_payout(Duration::from_millis(3 * 1000), 1000);
 		assert!(total_payout_0 > 10); // Test is meaningful if reward something
 
 		start_session(1);
@@ -220,18 +223,17 @@ fn rewards_should_work() {
 		start_session(3);
 
 		assert_eq!(Staking::active_era().unwrap().index, 1);
-		assert_eq!(mock::REWARD_REMAINDER_UNBALANCED.with(|v| *v.borrow()), 7050);
-		assert_eq!(*mock::staking_events().last().unwrap(), RawEvent::EraPayout(0, 2350, 7050));
+		assert_eq!(*mock::staking_events().last().unwrap(), RawEvent::EraPayout(0, total_payout_0));
+		//assert_eq!(*mock::staking_events().last().unwrap(), RawEvent::EraPayout(0, 2350, 7050));
 		mock::make_all_reward_payment(0);
 
-		assert_eq_error_rate!(Balances::total_balance(&10), init_balance_10 + part_for_10 * total_payout_0*2/3, 2);
+		assert_eq_error_rate!(Tokens::total_balance(VAL_TOKEN_ID, &10), part_for_10 * total_payout_0*2/3, 2);
 		assert_eq_error_rate!(Balances::total_balance(&11), init_balance_11, 2);
-		assert_eq_error_rate!(Balances::total_balance(&20), init_balance_20 + part_for_20 * total_payout_0*1/3, 2);
+		assert_eq_error_rate!(Tokens::total_balance(VAL_TOKEN_ID, &20), part_for_20 * total_payout_0*1/3, 2);
 		assert_eq_error_rate!(Balances::total_balance(&21), init_balance_21, 2);
 		assert_eq_error_rate!(
-			Balances::total_balance(&100),
-			init_balance_100
-				+ part_for_100_from_10 * total_payout_0 * 2/3
+			Tokens::total_balance(VAL_TOKEN_ID, &100),
+			part_for_100_from_10 * total_payout_0 * 2/3
 				+ part_for_100_from_20 * total_payout_0 * 1/3,
 			2
 		);
@@ -240,23 +242,24 @@ fn rewards_should_work() {
 		assert_eq_uvec!(Session::validators(), vec![11, 21]);
 		<Module<Test>>::reward_by_ids(vec![(11, 1)]);
 
+		// Assume that 1000 val was burned as transaction fees.
+		<Staking as crate::Store>::EraValBurned::put(1000);
+
 		// Compute total payout now for whole duration as other parameter won't change
-		let total_payout_1 = current_total_payout_for_duration(3 * 1000);
+		let total_payout_1 = current_total_payout(Duration::from_millis(6 * 1000), 1000);
 		assert!(total_payout_1 > 10); // Test is meaningful if reward something
 
 		mock::start_era(2);
-		assert_eq!(mock::REWARD_REMAINDER_UNBALANCED.with(|v| *v.borrow()), 7050*2);
-		assert_eq!(*mock::staking_events().last().unwrap(), RawEvent::EraPayout(1, 2350, 7050));
+		assert_eq!(*mock::staking_events().last().unwrap(), RawEvent::EraPayout(1, total_payout_1));
 		mock::make_all_reward_payment(1);
 
-		assert_eq_error_rate!(Balances::total_balance(&10), init_balance_10 + part_for_10 * (total_payout_0 * 2/3 + total_payout_1), 2);
+		assert_eq_error_rate!(Tokens::total_balance(VAL_TOKEN_ID, &10), part_for_10 * (total_payout_0 * 2/3 + total_payout_1), 2);
 		assert_eq_error_rate!(Balances::total_balance(&11), init_balance_11, 2);
-		assert_eq_error_rate!(Balances::total_balance(&20), init_balance_20 + part_for_20 * total_payout_0 * 1/3, 2);
+		assert_eq_error_rate!(Tokens::total_balance(VAL_TOKEN_ID, &20), part_for_20 * total_payout_0 * 1/3, 2);
 		assert_eq_error_rate!(Balances::total_balance(&21), init_balance_21, 2);
 		assert_eq_error_rate!(
-			Balances::total_balance(&100),
-			init_balance_100
-				+ part_for_100_from_10 * (total_payout_0 * 2/3 + total_payout_1)
+			Tokens::total_balance(VAL_TOKEN_ID, &100),
+			part_for_100_from_10 * (total_payout_0 * 2/3 + total_payout_1)
 				+ part_for_100_from_20 * total_payout_0 * 1/3,
 			2
 		);
@@ -434,8 +437,11 @@ fn nominating_and_rewards_should_work() {
 			assert_ok!(Staking::bond(Origin::signed(3), 4, 1000, RewardDestination::Controller));
 			assert_ok!(Staking::nominate(Origin::signed(4), vec![11, 21, 41]));
 
-			// the total reward for era 0
-			let total_payout_0 = current_total_payout_for_duration(3000);
+			// Assume that 1000 val was burned as transaction fees.
+			<Staking as crate::Store>::EraValBurned::put(1000);
+
+			// Compute total payout now for whole duration as other parameter won't change
+			let total_payout_0 = current_total_payout(Duration::from_millis(3 * 1000), 1000);
 			assert!(total_payout_0 > 100); // Test is meaningful if reward something
 			<Module<Test>>::reward_by_ids(vec![(41, 1)]);
 			<Module<Test>>::reward_by_ids(vec![(31, 1)]);
@@ -447,8 +453,8 @@ fn nominating_and_rewards_should_work() {
 
 			// OLD validators must have already received some rewards.
 			mock::make_all_reward_payment(0);
-			assert_eq!(Balances::total_balance(&40), 1 + total_payout_0 / 2);
-			assert_eq!(Balances::total_balance(&30), 1 + total_payout_0 / 2);
+			assert_eq!(Tokens::total_balance(VAL_TOKEN_ID, &40), total_payout_0 / 2);
+			assert_eq!(Tokens::total_balance(VAL_TOKEN_ID, &30), total_payout_0 / 2);
 
 			// ------ check the staked value of all parties.
 
@@ -477,8 +483,12 @@ fn nominating_and_rewards_should_work() {
 				},
 			);
 
-			// the total reward for era 1
-			let total_payout_1 = current_total_payout_for_duration(3000);
+			// Assume that 1000 val was burned as transaction fees.
+			<Staking as crate::Store>::EraValBurned::put(1000);
+
+			// Compute total payout now for whole duration as other parameter won't change
+			let total_payout_1 = current_total_payout(Duration::from_millis(6 * 1000), 1000);
+			
 			assert!(total_payout_1 > 100); // Test is meaningful if reward something
 			<Module<Test>>::reward_by_ids(vec![(21, 2)]);
 			<Module<Test>>::reward_by_ids(vec![(11, 1)]);
@@ -493,27 +503,27 @@ fn nominating_and_rewards_should_work() {
 			let payout_for_20 = 2 * total_payout_1 / 3;
 			// Nominator 2: has [400/1800 ~ 2/9 from 10] + [600/2200 ~ 3/11 from 20]'s reward. ==> 2/9 + 3/11
 			assert_eq_error_rate!(
-				Balances::total_balance(&2),
-				initial_balance + (2 * payout_for_10 / 9 + 3 * payout_for_20 / 11),
+				Tokens::total_balance(VAL_TOKEN_ID, &2),
+				(2 * payout_for_10 / 9 + 3 * payout_for_20 / 11),
 				1,
 			);
 			// Nominator 4: has [400/1800 ~ 2/9 from 10] + [600/2200 ~ 3/11 from 20]'s reward. ==> 2/9 + 3/11
 			assert_eq_error_rate!(
-				Balances::total_balance(&4),
-				initial_balance + (2 * payout_for_10 / 9 + 3 * payout_for_20 / 11),
+				Tokens::total_balance(VAL_TOKEN_ID, &4),
+				(2 * payout_for_10 / 9 + 3 * payout_for_20 / 11),
 				1,
 			);
 
 			// Validator 10: got 800 / 1800 external stake => 8/18 =? 4/9 => Validator's share = 5/9
 			assert_eq_error_rate!(
-				Balances::total_balance(&10),
-				initial_balance + 5 * payout_for_10 / 9,
+				Tokens::total_balance(VAL_TOKEN_ID, &10),
+				5 * payout_for_10 / 9,
 				1,
 			);
 			// Validator 20: got 1200 / 2200 external stake => 12/22 =? 6/11 => Validator's share = 5/11
 			assert_eq_error_rate!(
-				Balances::total_balance(&20),
-				initial_balance + 5 * payout_for_20 / 11,
+				Tokens::total_balance(VAL_TOKEN_ID, &20),
+				5 * payout_for_20 / 11,
 				1,
 			);
 		});
@@ -815,23 +825,27 @@ fn reward_destination_works() {
 			claimed_rewards: vec![],
 		}));
 
+		// Assume that 1000 val was burned as transaction fees.
+		<Staking as crate::Store>::EraValBurned::put(1000);
+
 		// Compute total payout now for whole duration as other parameter won't change
-		let total_payout_0 = current_total_payout_for_duration(3000);
+		let total_payout_0 = current_total_payout(Duration::from_millis(3 * 1000), 1000);
+
 		assert!(total_payout_0 > 100); // Test is meaningful if reward something
 		<Module<Test>>::reward_by_ids(vec![(11, 1)]);
 
 		mock::start_era(1);
 		mock::make_all_reward_payment(0);
 
-		// Check that RewardDestination is Staked (default)
-		assert_eq!(Staking::payee(&11), RewardDestination::Staked);
+		// Check that RewardDestination is Stash (default)
+		assert_eq!(Staking::payee(&11), RewardDestination::Stash);
 		// Check that reward went to the stash account of validator
-		assert_eq!(Balances::free_balance(11), 1000 + total_payout_0);
-		// Check that amount at stake increased accordingly
+		assert_eq!(Tokens::free_balance(VAL_TOKEN_ID, &11), total_payout_0);
+		// Check that amount at stake did not increase
 		assert_eq!(Staking::ledger(&10), Some(StakingLedger {
 			stash: 11,
-			total: 1000 + total_payout_0,
-			active: 1000 + total_payout_0,
+			total: 1000,
+			active: 1000,
 			unlocking: vec![],
 			claimed_rewards: vec![0],
 		}));
@@ -839,8 +853,12 @@ fn reward_destination_works() {
 		//Change RewardDestination to Stash
 		<Payee<Test>>::insert(&11, RewardDestination::Stash);
 
+		// Assume that 1000 val was burned as transaction fees.
+		<Staking as crate::Store>::EraValBurned::put(1000);
+
 		// Compute total payout now for whole duration as other parameter won't change
-		let total_payout_1 = current_total_payout_for_duration(3000);
+		let total_payout_1 = current_total_payout(Duration::from_millis(6 * 1000), 1000);
+
 		assert!(total_payout_1 > 100); // Test is meaningful if reward something
 		<Module<Test>>::reward_by_ids(vec![(11, 1)]);
 
@@ -850,14 +868,14 @@ fn reward_destination_works() {
 		// Check that RewardDestination is Stash
 		assert_eq!(Staking::payee(&11), RewardDestination::Stash);
 		// Check that reward went to the stash account
-		assert_eq!(Balances::free_balance(11), 1000 + total_payout_0 + total_payout_1);
+		assert_eq!(Tokens::free_balance(VAL_TOKEN_ID, &11), total_payout_0 + total_payout_1);
 		// Record this value
-		let recorded_stash_balance = 1000 + total_payout_0 + total_payout_1;
+		let recorded_stash_balance = total_payout_0 + total_payout_1;
 		// Check that amount at stake is NOT increased
 		assert_eq!(Staking::ledger(&10), Some(StakingLedger {
 			stash: 11,
-			total: 1000 + total_payout_0,
-			active: 1000 + total_payout_0,
+			total: 1000,
+			active: 1000,
 			unlocking: vec![],
 			claimed_rewards: vec![0,1],
 		}));
@@ -868,8 +886,12 @@ fn reward_destination_works() {
 		// Check controller balance
 		assert_eq!(Balances::free_balance(10), 1);
 
+		// Assume that 1000 val was burned as transaction fees.
+		<Staking as crate::Store>::EraValBurned::put(1000);
+
 		// Compute total payout now for whole duration as other parameter won't change
-		let total_payout_2 = current_total_payout_for_duration(3000);
+		let total_payout_2 = current_total_payout(Duration::from_millis(9 * 1000), 1000);
+
 		assert!(total_payout_2 > 100); // Test is meaningful if reward something
 		<Module<Test>>::reward_by_ids(vec![(11, 1)]);
 
@@ -879,17 +901,17 @@ fn reward_destination_works() {
 		// Check that RewardDestination is Controller
 		assert_eq!(Staking::payee(&11), RewardDestination::Controller);
 		// Check that reward went to the controller account
-		assert_eq!(Balances::free_balance(10), 1 + total_payout_2);
+		assert_eq!(Tokens::free_balance(VAL_TOKEN_ID, &10), total_payout_2);
 		// Check that amount at stake is NOT increased
 		assert_eq!(Staking::ledger(&10), Some(StakingLedger {
 			stash: 11,
-			total: 1000 + total_payout_0,
-			active: 1000 + total_payout_0,
+			total: 1000,
+			active: 1000,
 			unlocking: vec![],
 			claimed_rewards: vec![0,1,2],
 		}));
 		// Check that amount in staked account is NOT increased.
-		assert_eq!(Balances::free_balance(11), recorded_stash_balance);
+		assert_eq!(Tokens::free_balance(VAL_TOKEN_ID, &11), recorded_stash_balance);
 	});
 }
 
@@ -911,11 +933,15 @@ fn validator_payment_prefs_work() {
 		mock::start_era(1);
 		mock::make_all_reward_payment(0);
 
-		let balance_era_1_10 = Balances::total_balance(&10);
-		let balance_era_1_100 = Balances::total_balance(&100);
+		let balance_era_1_10 = Tokens::total_balance(VAL_TOKEN_ID, &10);
+		let balance_era_1_100 = Tokens::total_balance(VAL_TOKEN_ID, &100);
+
+		// Assume that 1000 val was burned as transaction fees.
+		<Staking as crate::Store>::EraValBurned::put(1000);
 
 		// Compute total payout now for whole duration as other parameter won't change
-		let total_payout_1 = current_total_payout_for_duration(3000);
+		let total_payout_1 = current_total_payout(Duration::from_millis(6 * 1000), 1000);
+
 		assert!(total_payout_1 > 100); // Test is meaningful if reward something
 		let exposure_1 = Staking::eras_stakers(Staking::active_era().unwrap().index, 11);
 		<Module<Test>>::reward_by_ids(vec![(11, 1)]);
@@ -927,8 +953,8 @@ fn validator_payment_prefs_work() {
 		let shared_cut = total_payout_1 - taken_cut;
 		let reward_of_10 = shared_cut * exposure_1.own / exposure_1.total + taken_cut;
 		let reward_of_100 = shared_cut * exposure_1.others[0].value / exposure_1.total;
-		assert_eq_error_rate!(Balances::total_balance(&10), balance_era_1_10 + reward_of_10, 2);
-		assert_eq_error_rate!(Balances::total_balance(&100), balance_era_1_100 + reward_of_100, 2);
+		assert_eq_error_rate!(Tokens::total_balance(VAL_TOKEN_ID, &10), balance_era_1_10 + reward_of_10, 2);
+		assert_eq_error_rate!(Tokens::total_balance(VAL_TOKEN_ID, &100), balance_era_1_100 + reward_of_100, 2);
 	});
 
 }
@@ -1410,8 +1436,12 @@ fn reward_to_stake_works() {
 		assert_eq!(Staking::eras_stakers(Staking::active_era().unwrap().index, 21).total, 69);
 		<Ledger<Test>>::insert(&20, StakingLedger { stash: 21, total: 69, active: 69, unlocking: vec![], claimed_rewards: vec![] });
 
+		// Assume that 1000 val was burned as transaction fees.
+		<Staking as crate::Store>::EraValBurned::put(1000);
+
 		// Compute total payout now for whole duration as other parameter won't change
-		let total_payout_0 = current_total_payout_for_duration(3000);
+		let total_payout_0 = current_total_payout(Duration::from_millis(3 * 1000), 1000);
+
 		assert!(total_payout_0 > 100); // Test is meaningful if reward something
 		<Module<Test>>::reward_by_ids(vec![(11, 1)]);
 		<Module<Test>>::reward_by_ids(vec![(21, 1)]);
@@ -1423,15 +1453,15 @@ fn reward_to_stake_works() {
 		assert_eq!(Staking::eras_stakers(Staking::active_era().unwrap().index, 11).total, 1000);
 		assert_eq!(Staking::eras_stakers(Staking::active_era().unwrap().index, 21).total, 69);
 
-		let _11_balance = Balances::free_balance(&11);
-		assert_eq!(_11_balance, 1000 + total_payout_0 / 2);
+		let _11_balance = Tokens::free_balance(VAL_TOKEN_ID, &11);
+		assert_eq!(_11_balance, total_payout_0 / 2);
 
 		// Trigger another new era as the info are frozen before the era start.
 		mock::start_era(2);
 
 		// -- new infos
-		assert_eq!(Staking::eras_stakers(Staking::active_era().unwrap().index, 11).total, 1000 + total_payout_0 / 2);
-		assert_eq!(Staking::eras_stakers(Staking::active_era().unwrap().index, 21).total, 69 + total_payout_0 / 2);
+		assert_eq!(Staking::eras_stakers(Staking::active_era().unwrap().index, 11).total, 1000);
+		assert_eq!(Staking::eras_stakers(Staking::active_era().unwrap().index, 21).total, 69);
 	});
 }
 
@@ -1680,8 +1710,12 @@ fn bond_with_little_staked_value_bounded() {
 			assert_ok!(Staking::bond(Origin::signed(1), 2, 1, RewardDestination::Controller));
 			assert_ok!(Staking::validate(Origin::signed(2), ValidatorPrefs::default()));
 
-			// reward era 0
-			let total_payout_0 = current_total_payout_for_duration(3000);
+			// Assume that 1000 val was burned as transaction fees.
+			<Staking as crate::Store>::EraValBurned::put(1000);
+
+			// Compute total payout now for whole duration as other parameter won't change
+			let total_payout_0 = current_total_payout(Duration::from_millis(3 * 1000), 1000);
+
 			assert!(total_payout_0 > 100); // Test is meaningful if reward something
 			reward_all_elected();
 			mock::start_era(1);
@@ -1693,12 +1727,16 @@ fn bond_with_little_staked_value_bounded() {
 			assert_eq!(Staking::eras_stakers(Staking::active_era().unwrap().index, 2).total, 0);
 
 			// Old ones are rewarded.
-			assert_eq!(Balances::free_balance(10), init_balance_10 + total_payout_0 / 3);
+			assert_eq!(Tokens::free_balance(VAL_TOKEN_ID, &10), total_payout_0 / 3);
 			// no rewards paid to 2. This was initial election.
 			assert_eq!(Balances::free_balance(2), init_balance_2);
 
-			// reward era 1
-			let total_payout_1 = current_total_payout_for_duration(3000);
+			// Assume that 1000 val was burned as transaction fees.
+			<Staking as crate::Store>::EraValBurned::put(1000);
+
+			// Compute total payout now for whole duration as other parameter won't change
+			let total_payout_1 = current_total_payout(Duration::from_millis(6 * 1000), 1000);
+
 			assert!(total_payout_1 > 100); // Test is meaningful if reward something
 			reward_all_elected();
 			mock::start_era(2);
@@ -1707,10 +1745,11 @@ fn bond_with_little_staked_value_bounded() {
 			assert_eq_uvec!(validator_controllers(), vec![20, 10, 2]);
 			assert_eq!(Staking::eras_stakers(Staking::active_era().unwrap().index, 2).total, 0);
 
-			assert_eq!(Balances::free_balance(2), init_balance_2 + total_payout_1 / 3);
-			assert_eq!(
-				Balances::free_balance(&10),
-				init_balance_10 + total_payout_0 / 3 + total_payout_1 / 3,
+			assert!(Tokens::free_balance(VAL_TOKEN_ID, &2) >= total_payout_1 / 3 - 1 && Tokens::free_balance(VAL_TOKEN_ID, &2) <= total_payout_1 / 3 + 1);
+			let payout_10 = total_payout_0 / 3 + total_payout_1 / 3;
+			assert!(
+				Tokens::free_balance(VAL_TOKEN_ID, &10) >= payout_10 - 1
+					&& Tokens::free_balance(VAL_TOKEN_ID, &10) <= payout_10 + 1
 			);
 		});
 }
@@ -1877,7 +1916,7 @@ fn reward_validator_slashing_validator_does_not_overflow() {
 		ErasStakersClipped::<Test>::insert(0, 11, exposure);
 		ErasValidatorReward::<Test>::insert(0, stake);
 		assert_ok!(Staking::payout_stakers(Origin::signed(1337), 11, 0));
-		assert_eq!(Balances::total_balance(&11), stake * 2);
+		assert_eq!(Tokens::total_balance(VAL_TOKEN_ID, &11), stake);
 
 		// Set staker
 		let _ = Balances::make_free_balance_be(&11, stake);
@@ -4135,8 +4174,12 @@ fn claim_reward_at_the_last_era_and_no_double_claim_and_invalid_claim() {
 		Payee::<Test>::insert(101, RewardDestination::Controller);
 
 		<Module<Test>>::reward_by_ids(vec![(11, 1)]);
+		// Assume that 1000 val was burned as transaction fees.
+		<Staking as crate::Store>::EraValBurned::put(1000);
+
 		// Compute total payout now for whole duration as other parameter won't change
-		let total_payout_0 = current_total_payout_for_duration(3000);
+		let total_payout_0 = current_total_payout(Duration::from_millis(3 * 1000), 1000);
+
 		assert!(total_payout_0 > 10); // Test is meaningful if reward something
 
 		mock::start_era(1);
@@ -4144,8 +4187,12 @@ fn claim_reward_at_the_last_era_and_no_double_claim_and_invalid_claim() {
 		<Module<Test>>::reward_by_ids(vec![(11, 1)]);
 		// Change total issuance in order to modify total payout
 		let _ = Balances::deposit_creating(&999, 1_000_000_000);
+		// Assume that 1000 val was burned as transaction fees.
+		<Staking as crate::Store>::EraValBurned::put(1000);
+
 		// Compute total payout now for whole duration as other parameter won't change
-		let total_payout_1 = current_total_payout_for_duration(3000);
+		let total_payout_1= current_total_payout(Duration::from_millis(6 * 1000), 1000);
+
 		assert!(total_payout_1 > 10); // Test is meaningful if reward something
 		assert!(total_payout_1 != total_payout_0);
 
@@ -4154,8 +4201,12 @@ fn claim_reward_at_the_last_era_and_no_double_claim_and_invalid_claim() {
 		<Module<Test>>::reward_by_ids(vec![(11, 1)]);
 		// Change total issuance in order to modify total payout
 		let _ = Balances::deposit_creating(&999, 1_000_000_000);
+		// Assume that 1000 val was burned as transaction fees.
+		<Staking as crate::Store>::EraValBurned::put(1000);
+
 		// Compute total payout now for whole duration as other parameter won't change
-		let total_payout_2 = current_total_payout_for_duration(3000);
+		let total_payout_2 = current_total_payout(Duration::from_millis(9 * 1000), 1000);
+
 		assert!(total_payout_2 > 10); // Test is meaningful if reward something
 		assert!(total_payout_2 != total_payout_0);
 		assert!(total_payout_2 != total_payout_1);
@@ -4190,13 +4241,15 @@ fn claim_reward_at_the_last_era_and_no_double_claim_and_invalid_claim() {
 		// Era 0 can't be rewarded anymore and current era can't be rewarded yet
 		// only era 1 and 2 can be rewarded.
 
-		assert_eq!(
-			Balances::total_balance(&10),
-			init_balance_10 + part_for_10 * (total_payout_1 + total_payout_2),
+		let balance_10 = Tokens::total_balance(VAL_TOKEN_ID, &10);
+		let expected_balance_10 = part_for_10 * (total_payout_1 + total_payout_2);
+		assert!(
+			balance_10 <= expected_balance_10 + 1 && balance_10 >= expected_balance_10 - 1
 		);
-		assert_eq!(
-			Balances::total_balance(&100),
-			init_balance_100 + part_for_100 * (total_payout_1 + total_payout_2),
+		let balance_100 = Tokens::total_balance(VAL_TOKEN_ID, &100);
+		let expected_balance_100 = part_for_100 * (total_payout_1 + total_payout_2);
+		assert!(
+			balance_100 <= expected_balance_100 + 1 && balance_100 >= expected_balance_100 - 1
 		);
 	});
 }
@@ -4314,8 +4367,12 @@ fn test_max_nominator_rewarded_per_validator_and_cant_steal_someone_else_reward(
 		mock::start_era(1);
 
 		<Module<Test>>::reward_by_ids(vec![(11, 1)]);
+		// Assume that 1000 val was burned as transaction fees.
+		<Staking as crate::Store>::EraValBurned::put(1000);
+
 		// Compute total payout now for whole duration as other parameter won't change
-		let total_payout_0 = current_total_payout_for_duration(3 * 1000);
+		let total_payout_0 = current_total_payout(Duration::from_millis(3 * 1000), 1000);
+
 		assert!(total_payout_0 > 100); // Test is meaningful if reward something
 
 		mock::start_era(2);
@@ -4327,8 +4384,9 @@ fn test_max_nominator_rewarded_per_validator_and_cant_steal_someone_else_reward(
 			let balance = 10_000 + i as Balance;
 			if stash == 10_000 {
 				assert!(Balances::free_balance(&stash) == balance);
+				assert_eq!(Tokens::free_balance(VAL_TOKEN_ID, &stash), 0);
 			} else {
-				assert!(Balances::free_balance(&stash) > balance);
+				assert!(Tokens::free_balance(VAL_TOKEN_ID, &stash) > 0);
 			}
 		}
 	});
@@ -4369,21 +4427,25 @@ fn test_payout_stakers() {
 
 		mock::start_era(1);
 		Staking::reward_by_ids(vec![(11, 1)]);
+		// Assume that 1000 val was burned as transaction fees.
+		<Staking as crate::Store>::EraValBurned::put(1000);
+
 		// Compute total payout now for whole duration as other parameter won't change
-		let total_payout_0 = current_total_payout_for_duration(3 * 1000);
+		let total_payout_0 = current_total_payout(Duration::from_millis(3 * 1000), 1000);
+
 		assert!(total_payout_0 > 100); // Test is meaningful if reward something
 		mock::start_era(2);
 		assert_ok!(Staking::payout_stakers(Origin::signed(1337), 11, 1));
 
 		// Top 64 nominators of validator 11 automatically paid out, including the validator
 		// Validator payout goes to controller.
-		assert!(Balances::free_balance(&10) > balance);
+		assert!(Tokens::free_balance(VAL_TOKEN_ID, &10) > 0);
 		for i in 36..100 {
-			assert!(Balances::free_balance(&(100 + i)) > balance + i as Balance);
+			assert!(Tokens::free_balance(VAL_TOKEN_ID, &(100 + i)) > 0);
 		}
 		// The bottom 36 do not
 		for i in 0..36 {
-			assert_eq!(Balances::free_balance(&(100 + i)), balance + i as Balance);
+			assert_eq!(Tokens::free_balance(VAL_TOKEN_ID, &(100 + i)), 0);
 		}
 
 		// We track rewards in `claimed_rewards` vec
@@ -4392,10 +4454,14 @@ fn test_payout_stakers() {
 			Some(StakingLedger { stash: 11, total: 1000, active: 1000, unlocking: vec![], claimed_rewards: vec![1] })
 		);
 
-		for i in 3..16 {
+		for i in 3u32..16 {
 			Staking::reward_by_ids(vec![(11, 1)]);
+			// Assume that 1000 val was burned as transaction fees.
+			<Staking as crate::Store>::EraValBurned::put(1000);
+
 			// Compute total payout now for whole duration as other parameter won't change
-			let total_payout_0 = current_total_payout_for_duration(3 * 1000);
+			let total_payout_0 = current_total_payout(Duration::from_millis((i as u64 + 1) * 3 * 1000), 1000);
+
 			assert!(total_payout_0 > 100); // Test is meaningful if reward something
 			mock::start_era(i);
 			assert_ok!(Staking::payout_stakers(Origin::signed(1337), 11, i - 1));
@@ -4407,10 +4473,14 @@ fn test_payout_stakers() {
 			Some(StakingLedger { stash: 11, total: 1000, active: 1000, unlocking: vec![], claimed_rewards: (1..=14).collect() })
 		);
 
-		for i in 16..100 {
+		for i in 16u32..100 {
 			Staking::reward_by_ids(vec![(11, 1)]);
+			// Assume that 1000 val was burned as transaction fees.
+			<Staking as crate::Store>::EraValBurned::put(1000);
+
 			// Compute total payout now for whole duration as other parameter won't change
-			let total_payout_0 = current_total_payout_for_duration(3 * 1000);
+			let total_payout_0 = current_total_payout(Duration::from_millis((i as u64 + 1) * 3 * 1000), 1000);
+
 			assert!(total_payout_0 > 100); // Test is meaningful if reward something
 			mock::start_era(i);
 		}
@@ -4449,8 +4519,12 @@ fn payout_stakers_handles_basic_errors() {
 
 		mock::start_era(1);
 		Staking::reward_by_ids(vec![(11, 1)]);
+		// Assume that 1000 val was burned as transaction fees.
+		<Staking as crate::Store>::EraValBurned::put(1000);
+
 		// Compute total payout now for whole duration as other parameter won't change
-		let total_payout_0 = current_total_payout_for_duration(3 * 1000);
+		let total_payout_0 = current_total_payout(Duration::from_millis(3000), 1000);
+
 		assert!(total_payout_0 > 100); // Test is meaningful if reward something
 		mock::start_era(2);
 
@@ -4459,10 +4533,14 @@ fn payout_stakers_handles_basic_errors() {
 		// Wrong Staker
 		assert_noop!(Staking::payout_stakers(Origin::signed(1337), 10, 1), Error::<Test>::NotStash);
 
-		for i in 3..100 {
+		for i in 3u32..100 {
 			Staking::reward_by_ids(vec![(11, 1)]);
+			// Assume that 1000 val was burned as transaction fees.
+			<Staking as crate::Store>::EraValBurned::put(1000);
+
 			// Compute total payout now for whole duration as other parameter won't change
-			let total_payout_0 = current_total_payout_for_duration(3 * 1000);
+			let total_payout_0 = current_total_payout(Duration::from_millis((i as u64 + 1) * 3000), 1000);
+
 			assert!(total_payout_0 > 100); // Test is meaningful if reward something
 			mock::start_era(i);
 		}
@@ -4584,7 +4662,7 @@ fn on_initialize_weight_is_correct() {
 		run_to_block(11);
 		Staking::on_finalize(System::block_number());
 		System::set_block_number((System::block_number() + 1).into());
-		Timestamp::set_timestamp(System::block_number() * 1000 + INIT_TIMESTAMP);
+		Timestamp::set_timestamp(System::block_number() * 1000);
 		Session::on_initialize(System::block_number());
 
 		assert_eq!(Validators::<Test>::iter().count(), 4);
@@ -4616,13 +4694,17 @@ fn payout_creates_controller() {
 
 		mock::start_era(1);
 		Staking::reward_by_ids(vec![(11, 1)]);
+		// Assume that 1000 val was burned as transaction fees.
+		<Staking as crate::Store>::EraValBurned::put(1000);
+
 		// Compute total payout now for whole duration as other parameter won't change
-		let total_payout_0 = current_total_payout_for_duration(3 * 1000);
+		let total_payout_0 = current_total_payout(Duration::from_millis(3000), 1000);
+
 		assert!(total_payout_0 > 100); // Test is meaningful if reward something
 		mock::start_era(2);
 		assert_ok!(Staking::payout_stakers(Origin::signed(1337), 11, 1));
 
 		// Controller is created
-		assert!(Balances::free_balance(1337) > 0);
+		assert!(Tokens::free_balance(VAL_TOKEN_ID, &1337) > 0);
 	})
 }
