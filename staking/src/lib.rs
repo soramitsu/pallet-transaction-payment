@@ -415,6 +415,10 @@ pub type PositiveImbalanceOf<T> =
 pub type NegativeImbalanceOf<T> =
 	<<T as Trait>::Currency as Currency<<T as frame_system::Trait>::AccountId>>::NegativeImbalance;
 
+pub trait ValBurnedNotifier<A> {
+	fn notify_val_burned(amount: A);
+}
+
 /// Reward points of an era. Used to split era total payout between validators.
 ///
 /// This points will be used to reward validators and their respective nominators.
@@ -2335,12 +2339,6 @@ decl_module! {
 }
 
 impl<T: Trait> Module<T> {
-	/// Notify the pallet that this `amount` of VAL token was burned.
-	pub fn notify_val_burned(amount: MultiCurrencyBalanceOf<T>) {
-		let total_val_burned: MultiCurrencyBalanceOf<T> = EraValBurned::<T>::get() + amount;
-		EraValBurned::<T>::put(total_val_burned);
-	}
-
 	/// The total balance that can be slashed from a stash account as of right now.
 	pub fn slashable_balance_of(stash: &T::AccountId) -> BalanceOf<T> {
 		// Weight note: consider making the stake accessible through stash.
@@ -3216,6 +3214,14 @@ impl<T: Trait> Module<T> {
 		SlashRewardFraction::put(fraction);
 	}
 
+}
+
+impl<T: Trait> ValBurnedNotifier<MultiCurrencyBalanceOf<T>> for Module<T> {
+	/// Notify the pallet that this `amount` of VAL token was burned.
+	fn notify_val_burned(amount: MultiCurrencyBalanceOf<T>) {
+		let total_val_burned: MultiCurrencyBalanceOf<T> = EraValBurned::<T>::get() + amount;
+		EraValBurned::<T>::put(total_val_burned);
+	}
 }
 
 /// In this implementation `new_session(session)` must be called before `end_session(session-1)`
