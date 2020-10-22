@@ -55,7 +55,9 @@ use frame_support::{traits::{Get, ReservableCurrency, Currency},
 	dispatch::{DispatchResultWithPostInfo, DispatchErrorWithPostInfo, PostDispatchInfo},
 };
 use frame_system::{self as system, ensure_signed, RawOrigin};
-use sp_runtime::{DispatchError, DispatchResult, traits::{Dispatchable, Zero}};
+use sp_runtime::{DispatchResult, traits::{Dispatchable, Zero}, Percent, FixedU128, FixedPointNumber};
+#[cfg(feature = "std")]
+use sp_runtime::{Serialize, Deserialize};
 
 mod tests;
 mod benchmarking;
@@ -146,8 +148,39 @@ pub struct Multisig<BlockNumber, Balance, AccountId> {
 	approvals: Vec<AccountId>,
 }
 
+#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
+#[derive(Clone, Eq, PartialEq, Encode, Decode, Default, RuntimeDebug)]
+pub struct MultisigAccount<AccountId> {
+	/// Parties of the account.
+	signatories: Vec<AccountId>,
+	/// Threshold represented in percents. Once reached,
+	/// the proposal will be executed.
+	threshold: Percent,
+}
+
+impl<AccountId: Ord> MultisigAccount<AccountId> {
+	pub fn new(mut signatories: Vec<AccountId>, threshold: Percent) -> Self {
+		signatories.sort();
+		MultisigAccount { signatories, threshold }
+	}
+}
+
+impl<AccountId: PartialEq + Ord> MultisigAccount<AccountId> {
+	pub fn is_signatory(&self, who: &AccountId) -> bool {
+		self.signatories.binary_search(who).is_ok()
+	}
+
+	/// Number of signatories needed for a proposal execution.
+	pub fn threshold_num(&self) -> u16 {
+		(FixedU128::from(self.signatories.len() as u128) * FixedU128::from(self.threshold)).saturating_mul_int(1)
+	}
+}
+
 decl_storage! {
 	trait Store for Module<T: Trait> as Multisig {
+		/// Multisignature accounts.
+		pub Accounts get(fn accounts) config(): map hasher(twox_64_concat) T::AccountId => Option<MultisigAccount<T::AccountId>>;
+
 		/// The set of open multisig operations.
 		pub Multisigs: double_map
 			hasher(twox_64_concat) T::AccountId, hasher(blake2_128_concat) [u8; 32]
@@ -171,8 +204,12 @@ decl_error! {
 		TooManySignatories,
 		/// The signatories were provided out of order; they should be ordered.
 		SignatoriesOutOfOrder,
-		/// The sender was contained in the other signatories; it shouldn't be.
-		SenderInSignatories,
+		/// The sender wasn't contained in the other signatories; it shouldn be.
+		SenderNotInSignatories,
+		/// The given account ID is not presented in the signatories.
+		NotInSignatories,
+		/// The given account ID is already presented in the signatories.
+		AlreadyInSignatories,
 		/// Multisig operation not found when attempting to cancel.
 		NotFound,
 		/// Only the account that originally created the multisig is able to cancel it.
@@ -183,10 +220,18 @@ decl_error! {
 		WrongTimepoint,
 		/// A timepoint was given, yet no multisig operation is underway.
 		UnexpectedTimepoint,
-		/// The maximum weight information provided was too low.
-		WeightTooLow,
 		/// The data to be stored is already stored.
 		AlreadyStored,
+		/// The maximum weight information provided was too low.
+		WeightTooLow,
+		/// Threshold should not be zero.
+		ZeroThreshold,
+		/// The multisig account is already registered.
+		MultisigAlreadyExists,
+		/// Corresponding multisig account wasn't found.
+		UnknownMultisigAccount,
+		/// Signatories list unordered or contains duplicated entries.
+		SignatoriesAreNotUniqueOrUnordered,
 	}
 }
 
@@ -197,6 +242,8 @@ decl_event! {
 		BlockNumber = <T as system::Trait>::BlockNumber,
 		CallHash = [u8; 32]
 	{
+		/// A new multisig created. [multisig]
+		MultisigAccountCreated(AccountId),
 		/// A new multisig operation has begun. [approving, multisig, call_hash]
 		NewMultisig(AccountId, AccountId, CallHash),
 		/// A multisig operation has been approved by someone. [approving, timepoint, multisig, call_hash]
@@ -262,6 +309,97 @@ decl_module! {
 		/// Deposit one of this module's events by using the default implementation.
 		fn deposit_event() = default;
 
+		/// Create a new multisig account.
+		/// TODO: update weights for `register_multisig`
+		/// # <weight>
+		/// Key: M - length of members,
+		/// - One storage reads - O(1)
+		/// - One search in sorted list - O(logM)
+		/// - Confirmation that the list is sorted - O(M)
+		/// - One storage writes - O(1)
+		/// - One event
+		/// Total Complexity: O(M + logM)
+		/// # <weight>
+		#[weight = 1]
+		pub fn register_multisig(origin, signatories: Vec<T::AccountId>, threshold: Percent) -> DispatchResult {
+			let who = ensure_signed(origin)?;
+			let block_num = <system::Module<T>>::block_number();
+			let nonce = <system::Module<T>>::account_nonce(&who);
+			let multisig_account_id = Self::multi_account_id(
+				&who,
+				block_num,
+				nonce
+			);
+			ensure!(Self::accounts(&multisig_account_id).is_none(), Error::<T>::MultisigAlreadyExists);
+			ensure!(!threshold.is_zero(), Error::<T>::ZeroThreshold);
+			let max_sigs = T::MaxSignatories::get() as usize;
+			ensure!(signatories.len() <= max_sigs, Error::<T>::TooManySignatories);
+			ensure!(signatories.contains(&who), Error::<T>::SenderNotInSignatories);
+			ensure!(Self::is_sort_and_unique(&signatories), Error::<T>::SignatoriesAreNotUniqueOrUnordered);
+			let multisig_config = MultisigAccount::new(signatories, threshold);
+			<Accounts<T>>::insert(&multisig_account_id, multisig_config);
+			Self::deposit_event(RawEvent::MultisigAccountCreated(multisig_account_id));
+			Ok(())
+		}
+
+		/// Remove the signatory from the multisig account.
+		/// Can only be called by a multisig account.
+		///
+		/// TODO: update weights for `remove_signatory`
+		/// # <weight>
+		/// Key: length of members in multisigConfig: M
+		/// - One storage reads - O(1)
+		/// - remove items in list - O(M)
+		/// Total complexity - O(M)
+		/// # <weight>
+		#[weight = 1]
+		pub fn remove_signatory(origin, signatory: T::AccountId) -> DispatchResult {
+			let who = ensure_signed(origin)?;
+			<Accounts<T>>::mutate(&who, |opt| {
+				let multisig = opt.as_mut().ok_or(Error::<T>::UnknownMultisigAccount)?;
+				// remove the signatory's approvals
+				let updated_ops = Multisigs::<T>::iter_prefix(&who).filter_map(|(k2, mut operation): (_, Multisig<_, _, _>)| {
+					if let Ok(pos) = operation.approvals.binary_search(&signatory) {
+						operation.approvals.remove(pos);
+						Some((k2, operation))
+					} else {
+						None
+					}
+				}).collect::<Vec<_>>();
+				for (k2, op) in updated_ops {
+					Multisigs::<T>::insert(&who, &k2, op);
+				}
+				// remove the signatory
+				let pos = multisig.signatories.binary_search(&signatory)
+				    .map_err(|_| Error::<T>::NotInSignatories)?;
+				multisig.signatories.remove(pos);
+				Ok(())
+			})
+		}
+
+		/// Add a new signatory to the multisig account.
+		/// Can only be called by a multisig account.
+		///
+		/// TODO: update weights for `add_signatory`
+		/// # <weight>
+		/// Key: length of members in multisigConfig: M
+		/// - One storage read - O(1)
+		/// - search in members - O(M)
+		/// - Storage write - O(M)
+		/// Total complexity - O(M)
+		/// # <weight>
+		#[weight = 1]
+		pub fn add_signatory(origin, new_member: T::AccountId) -> DispatchResult {
+			let who = ensure_signed(origin)?;
+            <Accounts<T>>::mutate(&who, |opt| {
+				let multisig = opt.as_mut().ok_or(Error::<T>::UnknownMultisigAccount)?;
+				ensure!(!multisig.signatories.contains(&new_member), Error::<T>::AlreadyInSignatories);
+				multisig.signatories.push(new_member.clone());
+				multisig.signatories.sort();
+				Ok(())
+			})
+		}
+
 		/// Immediately dispatch a multi-signature call using a single approval from the caller.
 		///
 		/// The dispatch origin for this call must be _Signed_.
@@ -287,17 +425,14 @@ decl_module! {
 			call.get_dispatch_info().class,
 		)]
 		fn as_multi_threshold_1(origin,
-			other_signatories: Vec<T::AccountId>,
+			id: T::AccountId,
 			call: Box<<T as Trait>::Call>,
 		) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
-			let max_sigs = T::MaxSignatories::get() as usize;
-			ensure!(!other_signatories.is_empty(), Error::<T>::TooFewSignatories);
-			let other_signatories_len = other_signatories.len();
-			ensure!(other_signatories_len < max_sigs, Error::<T>::TooManySignatories);
-			let signatories = Self::ensure_sorted_and_insert(other_signatories, who)?;
-
-			let id = Self::multi_account_id(&signatories, 1);
+			let multisig: MultisigAccount<T::AccountId> = Self::accounts(&id).unwrap();
+			ensure!(multisig.threshold_num() == 1, Error::<T>::TooManySignatories);
+			let signatories = multisig.signatories;
+			ensure!(signatories.contains(&who), Error::<T>::NotInSignatories);
 
 			let call_len = call.using_encoded(|c| c.len());
 			let result = call.dispatch(RawOrigin::Signed(id).into());
@@ -374,22 +509,21 @@ decl_module! {
 		/// - Plus Call Weight
 		/// # </weight>
 		#[weight = weight_of::as_multi::<T>(
-			other_signatories.len(),
+			0,
 			call.len(),
 			*max_weight,
 			true, // assume worst case: calls write
 			true, // assume worst case: refunded
 		)]
 		fn as_multi(origin,
-			threshold: u16,
-			other_signatories: Vec<T::AccountId>,
+			id: T::AccountId,
 			maybe_timepoint: Option<Timepoint<T::BlockNumber>>,
 			call: OpaqueCall,
 			store_call: bool,
 			max_weight: Weight,
 		) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
-			Self::operate(who, threshold, other_signatories, maybe_timepoint, CallOrHash::Call(call, store_call), max_weight)
+			Self::operate(who, id, maybe_timepoint, CallOrHash::Call(call, store_call), max_weight)
 		}
 
 		/// Register approval for a dispatch to be made from a deterministic composite account if
@@ -432,21 +566,20 @@ decl_module! {
 		///     - Write: Multisig Storage, [Caller Account]
 		/// # </weight>
 		#[weight = weight_of::as_multi::<T>(
-			other_signatories.len(),
+			0,
 			0, // call_len is zero in this case
 			*max_weight,
 			true, // assume worst case: calls write
 			true, // assume worst case: refunded
 		)]
 		fn approve_as_multi(origin,
-			threshold: u16,
-			other_signatories: Vec<T::AccountId>,
+			id: T::AccountId,
 			maybe_timepoint: Option<Timepoint<T::BlockNumber>>,
 			call_hash: [u8; 32],
 			max_weight: Weight,
 		) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
-			Self::operate(who, threshold, other_signatories, maybe_timepoint, CallOrHash::Hash(call_hash), max_weight)
+			Self::operate(who, id, maybe_timepoint, CallOrHash::Hash(call_hash), max_weight)
 		}
 
 		/// Cancel a pre-existing, on-going multisig transaction. Any deposit reserved previously
@@ -478,22 +611,17 @@ decl_module! {
 		/// # </weight>
 		#[weight = T::DbWeight::get().reads_writes(3, 3)
 			.saturating_add(36 * WEIGHT_PER_MICROS)
-			.saturating_add((other_signatories.len() as Weight).saturating_mul(100 * WEIGHT_PER_NANOS))
+			.saturating_add((0 as Weight).saturating_mul(100 * WEIGHT_PER_NANOS))
 		]
 		fn cancel_as_multi(origin,
-			threshold: u16,
-			other_signatories: Vec<T::AccountId>,
+			id: T::AccountId,
 			timepoint: Timepoint<T::BlockNumber>,
 			call_hash: [u8; 32],
 		) -> DispatchResult {
 			let who = ensure_signed(origin)?;
-			ensure!(threshold >= 2, Error::<T>::MinimumThreshold);
-			let max_sigs = T::MaxSignatories::get() as usize;
-			ensure!(!other_signatories.is_empty(), Error::<T>::TooFewSignatories);
-			ensure!(other_signatories.len() < max_sigs, Error::<T>::TooManySignatories);
-			let signatories = Self::ensure_sorted_and_insert(other_signatories, who.clone())?;
-
-			let id = Self::multi_account_id(&signatories, threshold);
+			let multisig = Self::accounts(&id).ok_or(Error::<T>::UnknownMultisigAccount)?;
+			let threshold = multisig.threshold_num();
+			ensure!(threshold > 1, Error::<T>::MinimumThreshold);
 
 			let m = <Multisigs<T>>::get(&id, call_hash)
 				.ok_or(Error::<T>::NotFound)?;
@@ -515,27 +643,28 @@ impl<T: Trait> Module<T> {
 	/// required.
 	///
 	/// NOTE: `who` must be sorted. If it is not, then you'll get the wrong answer.
-	pub fn multi_account_id(who: &[T::AccountId], threshold: u16) -> T::AccountId {
-		let entropy = (b"modlpy/utilisuba", who, threshold).using_encoded(blake2_256);
+	pub fn multi_account_id(creator: &T::AccountId, block_number: T::BlockNumber, salt: T::Index) -> T::AccountId {
+		let entropy = (b"modlpy/utilisuba", creator, block_number, salt).using_encoded(blake2_256);
 		T::AccountId::decode(&mut &entropy[..]).unwrap_or_default()
+	}
+
+	fn is_sort_and_unique(members: &[T::AccountId]) -> bool {
+		members.windows(2).all(|m| m[0] < m[1])
 	}
 
 	fn operate(
 		who: T::AccountId,
-		threshold: u16,
-		other_signatories: Vec<T::AccountId>,
+		id: T::AccountId,
 		maybe_timepoint: Option<Timepoint<T::BlockNumber>>,
 		call_or_hash: CallOrHash,
 		max_weight: Weight,
 	) -> DispatchResultWithPostInfo {
-		ensure!(threshold >= 2, Error::<T>::MinimumThreshold);
-		let max_sigs = T::MaxSignatories::get() as usize;
-		ensure!(!other_signatories.is_empty(), Error::<T>::TooFewSignatories);
-		let other_signatories_len = other_signatories.len();
-		ensure!(other_signatories_len < max_sigs, Error::<T>::TooManySignatories);
-		let signatories = Self::ensure_sorted_and_insert(other_signatories, who.clone())?;
-
-		let id = Self::multi_account_id(&signatories, threshold);
+		let multisig: MultisigAccount<T::AccountId> = Self::accounts(&id).ok_or(Error::<T>::UnknownMultisigAccount)?;
+		let threshold = multisig.threshold_num();
+		ensure!(threshold > 1, Error::<T>::MinimumThreshold);
+		ensure!(multisig.is_signatory(&who), Error::<T>::SenderNotInSignatories);
+		let signatories = multisig.signatories;
+		let signatories_len = signatories.len();
 
 		// Threshold > 1; this means it's a multi-step operation. We extract the `call_hash`.
 		let (call_hash, call_len, maybe_call, store) = match call_or_hash {
@@ -580,7 +709,7 @@ impl<T: Trait> Module<T> {
 					who, timepoint, id, call_hash, result.map(|_| ()).map_err(|e| e.error)
 				));
 				Ok(get_result_weight(result).map(|actual_weight| weight_of::as_multi::<T>(
-					other_signatories_len,
+					signatories_len,
 					call_len,
 					actual_weight,
 					true, // Call is removed
@@ -611,7 +740,7 @@ impl<T: Trait> Module<T> {
 
 				// Call is not made, so the actual weight does not include call
 				Ok(Some(weight_of::as_multi::<T>(
-					other_signatories_len,
+					signatories_len,
 					call_len,
 					0,
 					stored, // Call stored?
@@ -643,7 +772,7 @@ impl<T: Trait> Module<T> {
 			Self::deposit_event(RawEvent::NewMultisig(who, id, call_hash));
 			// Call is not made, so we can return that weight
 			return Ok(Some(weight_of::as_multi::<T>(
-				other_signatories_len,
+				signatories_len,
 				call_len,
 				0,
 				stored, // Call stored?
@@ -695,27 +824,6 @@ impl<T: Trait> Module<T> {
 			height: <system::Module<T>>::block_number(),
 			index: <system::Module<T>>::extrinsic_index().unwrap_or_default(),
 		}
-	}
-
-	/// Check that signatories is sorted and doesn't contain sender, then insert sender.
-	fn ensure_sorted_and_insert(other_signatories: Vec<T::AccountId>, who: T::AccountId)
-		-> Result<Vec<T::AccountId>, DispatchError>
-	{
-		let mut signatories = other_signatories;
-		let mut maybe_last = None;
-		let mut index = 0;
-		for item in signatories.iter() {
-			if let Some(last) = maybe_last {
-				ensure!(last < item, Error::<T>::SignatoriesOutOfOrder);
-			}
-			if item <= &who {
-				ensure!(item != &who, Error::<T>::SenderInSignatories);
-				index += 1;
-			}
-			maybe_last = Some(item);
-		}
-		signatories.insert(index, who);
-		Ok(signatories)
 	}
 }
 
