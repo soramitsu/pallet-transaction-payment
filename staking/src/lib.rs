@@ -2866,6 +2866,9 @@ impl<T: Trait> Module<T> {
 
 			// Set ending era reward.
 			<ErasValidatorReward<T>>::insert(&active_era.index, validator_payout);
+			
+			let zero: MultiCurrencyBalanceOf<T> = 0u32.into();
+			EraValBurned::<T>::put(zero);
 		}
 	}
 

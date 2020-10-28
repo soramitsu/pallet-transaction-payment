@@ -170,6 +170,20 @@ fn change_controller_works() {
 }
 
 #[test]
+fn notify_val_burned_should_work() {
+	ExtBuilder::default().nominate(true).build_and_execute(|| {
+		<Module<Test>>::notify_val_burned(1000);
+		<Module<Test>>::notify_val_burned(2000);
+		assert_eq!(<Staking as crate::Store>::EraValBurned::get(), 3000);
+		<Module<Test>>::end_era(ActiveEraInfo {
+			index: 0,
+			start: Some(1),
+		}, 0);
+		assert_eq!(<Staking as crate::Store>::EraValBurned::get(), 0);
+	});
+}
+
+#[test]
 fn rewards_should_work() {
 	// should check that:
 	// * rewards get recorded per session
