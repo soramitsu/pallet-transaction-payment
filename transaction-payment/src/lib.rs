@@ -665,11 +665,12 @@ mod tests {
         type MaximumBlockLength = MaximumBlockLength;
         type AvailableBlockRatio = AvailableBlockRatio;
         type Version = ();
-        type ModuleToIndex = ();
+        //type ModuleToIndex = ();
         type AccountData = pallet_balances::AccountData<u64>;
         type OnNewAccount = ();
         type OnKilledAccount = ();
         type SystemWeightInfo = ();
+        type PalletInfo = ();
     }
 
     parameter_types! {
@@ -683,6 +684,7 @@ mod tests {
         type ExistentialDeposit = ExistentialDeposit;
         type AccountStore = System;
         type WeightInfo = ();
+        type MaxLocks = ();
     }
     thread_local! {
         static TRANSACTION_BYTE_FEE: RefCell<u64> = RefCell::new(1);

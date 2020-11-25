@@ -325,7 +325,7 @@ use frame_system::{
 };
 use sp_npos_elections::{
 	ExtendedBalance, Assignment, ElectionScore, ElectionResult as PrimitiveElectionResult,
-	build_support_map, evaluate_support, seq_phragmen, generate_compact_solution_type,
+	build_support_map, evaluate_support, seq_phragmen, generate_solution_type,
 	is_score_better, VotingLimit, SupportMap, VoteWeight,
 };
 use core::time::Duration;
@@ -383,7 +383,14 @@ pub type EraIndex = u32;
 pub type RewardPoint = u32;
 
 // Note: Maximum nomination limit is set here -- 16.
-generate_compact_solution_type!(pub GenericCompactAssignments, 16);
+//generate_solution_type!(
+//    pub GenericCompactAssignments, 16);
+
+// Note: Maximum nomination limit is set here -- 16.
+generate_solution_type!(
+    #[compact]
+    pub struct GenericCompactAssignments::<NominatorIndex, ValidatorIndex, OffchainAccuracy>(16)
+);
 
 /// Information regarding the active era (era in used in session).
 #[derive(Encode, Decode, RuntimeDebug)]
@@ -407,8 +414,8 @@ pub type OffchainAccuracy = PerU16;
 pub type BalanceOf<T> = <<T as Trait>::Currency as Currency<<T as frame_system::Trait>::AccountId>>::Balance;
 
 /// The compact type for election solutions.
-pub type CompactAssignments =
-	GenericCompactAssignments<NominatorIndex, ValidatorIndex, OffchainAccuracy>;
+pub type CompactAssignments = GenericCompactAssignments;
+	//GenericCompactAssignments<NominatorIndex, ValidatorIndex, OffchainAccuracy>;
 
 pub type PositiveImbalanceOf<T> =
 	<<T as Trait>::Currency as Currency<<T as frame_system::Trait>::AccountId>>::PositiveImbalance;
