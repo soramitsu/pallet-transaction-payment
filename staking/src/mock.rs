@@ -223,11 +223,11 @@ impl frame_system::Trait for Test {
 	type AvailableBlockRatio = AvailableBlockRatio;
 	type MaximumBlockLength = MaximumBlockLength;
 	type Version = ();
-	//type ModuleToIndex = ();
 	type AccountData = pallet_balances::AccountData<Balance>;
 	type OnNewAccount = ();
 	type OnKilledAccount = ();
 	type SystemWeightInfo = ();
+	type PalletInfo = ();
 }
 impl pallet_balances::Trait for Test {
 	type Balance = Balance;
@@ -236,6 +236,7 @@ impl pallet_balances::Trait for Test {
 	type ExistentialDeposit = ExistentialDeposit;
 	type AccountStore = System;
 	type WeightInfo = ();
+	type MaxLocks = ();
 }
 parameter_types! {
 	pub const Offset: BlockNumber = 0;
@@ -287,7 +288,8 @@ impl tokens::Trait for Test {
     type Balance = Balance;
     type Amount = Amount;
     type CurrencyId = CurrencyId;
-    type OnReceived = ();
+	type OnReceived = ();
+	type WeightInfo = ();
 }
 
 parameter_types! {
