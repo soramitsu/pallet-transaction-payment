@@ -3226,13 +3226,10 @@ impl<T: Trait> Module<T> {
 
 }
 
-impl<T: Trait, A> ValBurnedNotifier<A> for Module<T>
-	where A: AtLeast32BitUnsigned + Copy
-{
+impl<T: Trait> ValBurnedNotifier<MultiCurrencyBalanceOf<T>> for Module<T> {
 	/// Notify the pallet that this `amount` of VAL token was burned.
-	fn notify_val_burned(amount: A) {
-		let value: u128 = amount.unique_saturated_into();
-		let total_val_burned: MultiCurrencyBalanceOf<T> = EraValBurned::<T>::get() + value.unique_saturated_into();
+	fn notify_val_burned(amount: MultiCurrencyBalanceOf<T>) {
+		let total_val_burned: MultiCurrencyBalanceOf<T> = EraValBurned::<T>::get() + amount;
 		EraValBurned::<T>::put(total_val_burned);
 	}
 }
