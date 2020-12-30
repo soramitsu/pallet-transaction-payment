@@ -411,7 +411,11 @@ where
             let unadjusted_weight_fee = Self::weight_to_fee(weight);
             let multiplier = Self::next_fee_multiplier();
             // final adjusted weight fee.
-            let adjusted_weight_fee = multiplier.saturating_mul_int(unadjusted_weight_fee);
+            let adjusted_weight_fee = unadjusted_weight_fee.saturating_mul(
+                multiplier
+                .saturating_mul_int(1u128)
+                .saturated_into()
+            );
 
             let base_fee = Self::weight_to_fee(T::ExtrinsicBaseWeight::get());
             base_fee
