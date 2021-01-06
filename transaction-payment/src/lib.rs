@@ -29,8 +29,8 @@ use frame_support::{
 use pallet_transaction_payment_rpc_runtime_api::RuntimeDispatchInfo;
 use sp_runtime::{
     traits::{
-        Convert, DispatchInfoOf, Dispatchable, PostDispatchInfoOf, SaturatedConversion, Saturating,
-        SignedExtension, Zero,
+        CheckedDiv, Convert, DispatchInfoOf, Dispatchable, PostDispatchInfoOf, SaturatedConversion,
+        Saturating, SignedExtension, Zero,
     },
     transaction_validity::{
         InvalidTransaction, TransactionPriority, TransactionValidity, TransactionValidityError,
@@ -411,11 +411,17 @@ where
             let unadjusted_weight_fee = Self::weight_to_fee(weight);
             let multiplier = Self::next_fee_multiplier();
             // final adjusted weight fee.
-            let adjusted_weight_fee = unadjusted_weight_fee.saturating_mul(
-                multiplier
-                .saturating_mul_int(1u128)
-                .saturated_into()
-            );
+            // The original implementation of the formula `adjusted_weight_fee = multiplier * unadjusted_weight_fee` as
+            // `adjusted_weight_fee = multiplier.saturating_mul_int(unadjusted_weight_fee)` modified to account for the
+            // Balance type being essentially a fixed-point type to handle the situation when
+            // the `unadjusted_weight_fee` being a fractional value < 1 would results in 0 when converted to an integer
+            let multiplier_numerator: BalanceOf<T> = multiplier.into_inner().saturated_into();
+            let multiplier_denominator: BalanceOf<T> =
+                (Multiplier::accuracy() as u128).saturated_into();
+            let adjusted_weight_fee = unadjusted_weight_fee
+                .saturating_mul(multiplier_numerator)
+                .checked_div(&multiplier_denominator)
+                .unwrap_or(0_u32.into());
 
             let base_fee = Self::weight_to_fee(T::ExtrinsicBaseWeight::get());
             base_fee
