@@ -46,12 +46,15 @@
 // Ensure we're `no_std` when compiling for Wasm.
 #![cfg_attr(not(feature = "std"), no_std)]
 
+#[macro_use]
+extern crate alloc;
+
 use sp_std::prelude::*;
 use codec::{Encode, Decode};
 use sp_io::hashing::blake2_256;
 use frame_support::{decl_module, decl_event, decl_error, decl_storage, Parameter, ensure, RuntimeDebug};
 use frame_support::{traits::{Get, ReservableCurrency, Currency},
-	weights::{Weight, GetDispatchInfo, constants::{WEIGHT_PER_NANOS, WEIGHT_PER_MICROS}},
+	weights::{Weight, GetDispatchInfo, Pays, constants::{WEIGHT_PER_NANOS, WEIGHT_PER_MICROS}},
 	dispatch::{DispatchResultWithPostInfo, DispatchErrorWithPostInfo, PostDispatchInfo},
 };
 use frame_system::{self as system, ensure_signed, RawOrigin};
@@ -165,7 +168,7 @@ impl<AccountId: Ord> MultisigAccount<AccountId> {
 	}
 }
 
-impl<AccountId: PartialEq + Ord> MultisigAccount<AccountId> {
+impl<AccountId: PartialEq + Ord + Encode> MultisigAccount<AccountId> {
 	pub fn is_signatory(&self, who: &AccountId) -> bool {
 		self.signatories.binary_search(who).is_ok()
 	}
@@ -187,6 +190,11 @@ decl_storage! {
 			=> Option<Multisig<T::BlockNumber, BalanceOf<T>, T::AccountId>>;
 
 		pub Calls: map hasher(identity) [u8; 32] => Option<(OpaqueCall, T::AccountId, BalanceOf<T>)>;
+
+		pub DispatchedCalls: double_map
+			hasher(identity) [u8; 32],
+			hasher(twox_64_concat) Timepoint<T::BlockNumber>
+			=> ();
 	}
 }
 
@@ -232,6 +240,8 @@ decl_error! {
 		UnknownMultisigAccount,
 		/// Signatories list unordered or contains duplicated entries.
 		SignatoriesAreNotUniqueOrUnordered,
+		/// Call with the given hash was already dispatched.
+		AlreadyDispatched,
 	}
 }
 
@@ -320,7 +330,7 @@ decl_module! {
 		/// - One event
 		/// Total Complexity: O(M + logM)
 		/// # <weight>
-		#[weight = 1]
+        #[weight = (0, Pays::No)]
 		pub fn register_multisig(origin, signatories: Vec<T::AccountId>, threshold: Percent) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 			let block_num = <system::Module<T>>::block_number();
@@ -352,7 +362,7 @@ decl_module! {
 		/// - remove items in list - O(M)
 		/// Total complexity - O(M)
 		/// # <weight>
-		#[weight = 1]
+        #[weight = (0, Pays::No)]
 		pub fn remove_signatory(origin, signatory: T::AccountId) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 			<Accounts<T>>::mutate(&who, |opt| {
@@ -388,7 +398,7 @@ decl_module! {
 		/// - Storage write - O(M)
 		/// Total complexity - O(M)
 		/// # <weight>
-		#[weight = 1]
+        #[weight = (0, Pays::No)]
 		pub fn add_signatory(origin, new_member: T::AccountId) -> DispatchResult {
 			let who = ensure_signed(origin)?;
             <Accounts<T>>::mutate(&who, |opt| {
@@ -417,13 +427,7 @@ decl_module! {
 		/// - DB Weight: None
 		/// - Plus Call Weight
 		/// # </weight>
-		#[weight = (
-			weight_of::as_multi_threshold_1::<T>(
-				call.using_encoded(|c| c.len()),
-				call.get_dispatch_info().weight
-			),
-			call.get_dispatch_info().class,
-		)]
+        #[weight = (0, Pays::No)]
 		fn as_multi_threshold_1(origin,
 			id: T::AccountId,
 			call: Box<<T as Trait>::Call>,
@@ -508,22 +512,16 @@ decl_module! {
 		///     - Writes: Multisig Storage, [Caller Account], Calls (if `store_call`)
 		/// - Plus Call Weight
 		/// # </weight>
-		#[weight = weight_of::as_multi::<T>(
-			0,
-			call.len(),
-			*max_weight,
-			true, // assume worst case: calls write
-			true, // assume worst case: refunded
-		)]
+        #[weight = (0, Pays::No)]
 		fn as_multi(origin,
 			id: T::AccountId,
 			maybe_timepoint: Option<Timepoint<T::BlockNumber>>,
 			call: OpaqueCall,
 			store_call: bool,
 			max_weight: Weight,
-		) -> DispatchResultWithPostInfo {
+		) {
 			let who = ensure_signed(origin)?;
-			Self::operate(who, id, maybe_timepoint, CallOrHash::Call(call, store_call), max_weight)
+			Self::operate(who, id, maybe_timepoint, CallOrHash::Call(call, store_call), max_weight).map_err(|x| x.error)?;
 		}
 
 		/// Register approval for a dispatch to be made from a deterministic composite account if
@@ -565,13 +563,7 @@ decl_module! {
 		///     - Read: Multisig Storage, [Caller Account]
 		///     - Write: Multisig Storage, [Caller Account]
 		/// # </weight>
-		#[weight = weight_of::as_multi::<T>(
-			0,
-			0, // call_len is zero in this case
-			*max_weight,
-			true, // assume worst case: calls write
-			true, // assume worst case: refunded
-		)]
+        #[weight = (0, Pays::No)]
 		fn approve_as_multi(origin,
 			id: T::AccountId,
 			maybe_timepoint: Option<Timepoint<T::BlockNumber>>,
@@ -609,10 +601,7 @@ decl_module! {
 		///     - Read: Multisig Storage, [Caller Account], Refund Account, Calls
 		///     - Write: Multisig Storage, [Caller Account], Refund Account, Calls
 		/// # </weight>
-		#[weight = T::DbWeight::get().reads_writes(3, 3)
-			.saturating_add(36 * WEIGHT_PER_MICROS)
-			.saturating_add((0 as Weight).saturating_mul(100 * WEIGHT_PER_NANOS))
-		]
+        #[weight = (0, Pays::No)]
 		fn cancel_as_multi(origin,
 			id: T::AccountId,
 			timepoint: Timepoint<T::BlockNumber>,
@@ -628,7 +617,6 @@ decl_module! {
 			ensure!(m.when == timepoint, Error::<T>::WrongTimepoint);
 			ensure!(m.depositor == who, Error::<T>::NotOwner);
 
-			let _ = T::Currency::unreserve(&m.depositor, m.deposit);
 			<Multisigs<T>>::remove(&id, &call_hash);
 			Self::clear_call(&call_hash);
 
@@ -681,6 +669,7 @@ impl<T: Trait> Module<T> {
 			// Yes; ensure that the timepoint exists and agrees.
 			let timepoint = maybe_timepoint.ok_or(Error::<T>::NoTimepoint)?;
 			ensure!(m.when == timepoint, Error::<T>::WrongTimepoint);
+			ensure!(!DispatchedCalls::<T>::contains_key(&call_hash, timepoint), Error::<T>::AlreadyDispatched);
 
 			// Ensure that either we have not yet signed or that it is at threshold.
 			let mut approvals = m.approvals.len() as u16;
@@ -702,9 +691,9 @@ impl<T: Trait> Module<T> {
 				// attack.
 				<Multisigs<T>>::remove(&id, call_hash);
 				Self::clear_call(&call_hash);
-				T::Currency::unreserve(&m.depositor, m.deposit);
 
 				let result = call.dispatch(RawOrigin::Signed(id.clone()).into());
+				DispatchedCalls::<T>::insert(&call_hash, timepoint.clone(), ());
 				Self::deposit_event(RawEvent::MultisigExecuted(
 					who, timepoint, id, call_hash, result.map(|_| ()).map_err(|e| e.error)
 				));
@@ -731,7 +720,7 @@ impl<T: Trait> Module<T> {
 					// Record approval.
 					m.approvals.insert(pos, who.clone());
 					<Multisigs<T>>::insert(&id, call_hash, m);
-					Self::deposit_event(RawEvent::MultisigApproval(who, timepoint, id, call_hash));
+					Self::deposit_event(RawEvent::MultisigApproval(who, timepoint.clone(), id, call_hash));
 				} else {
 					// If we already approved and didn't store the Call, then this was useless and
 					// we report an error.
@@ -748,9 +737,6 @@ impl<T: Trait> Module<T> {
 				)).into())
 			}
 		} else {
-			// Not yet started; there should be no timepoint given.
-			ensure!(maybe_timepoint.is_none(), Error::<T>::UnexpectedTimepoint);
-
 			// Just start the operation by recording it in storage.
 			let deposit = T::DepositBase::get() + T::DepositFactor::get() * threshold.into();
 
@@ -759,12 +745,14 @@ impl<T: Trait> Module<T> {
 				Self::store_call_and_reserve(who.clone(), &call_hash, data, deposit)?;
 				true
 			} else {
-				T::Currency::reserve(&who, deposit)?;
 				false
 			};
 
+			let timepoint = maybe_timepoint.unwrap_or_else(|| Self::timepoint());
+			ensure!(!DispatchedCalls::<T>::contains_key(&call_hash, timepoint), Error::<T>::AlreadyDispatched);
+
 			<Multisigs<T>>::insert(&id, call_hash, Multisig {
-				when: Self::timepoint(),
+				when: timepoint,
 				deposit,
 				depositor: who.clone(),
 				approvals: vec![who.clone()],
@@ -795,7 +783,6 @@ impl<T: Trait> Module<T> {
 		ensure!(!Calls::<T>::contains_key(hash), Error::<T>::AlreadyStored);
 		let deposit = other_deposit + T::DepositBase::get()
 			+ T::DepositFactor::get() * BalanceOf::<T>::from(((data.len() + 31) / 32) as u32);
-		T::Currency::reserve(&who, deposit)?;
 		Calls::<T>::insert(&hash, (data, who, deposit));
 		Ok(())
 	}
@@ -813,9 +800,7 @@ impl<T: Trait> Module<T> {
 
 	/// Attempt to remove a call from storage, returning any deposit on it to the owner.
 	fn clear_call(hash: &[u8; 32]) {
-		if let Some((_, who, deposit)) = Calls::<T>::take(hash) {
-			T::Currency::unreserve(&who, deposit);
-		}
+		let _ = Calls::<T>::take(hash);
 	}
 
 	/// The current `Timepoint`.
