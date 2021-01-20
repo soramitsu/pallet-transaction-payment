@@ -401,7 +401,7 @@ decl_module! {
         #[weight = (0, Pays::No)]
 		pub fn add_signatory(origin, new_member: T::AccountId) -> DispatchResult {
 			let who = ensure_signed(origin)?;
-            <Accounts<T>>::mutate(&who, |opt| {
+				<Accounts<T>>::mutate(&who, |opt| {
 				let multisig = opt.as_mut().ok_or(Error::<T>::UnknownMultisigAccount)?;
 				ensure!(!multisig.signatories.contains(&new_member), Error::<T>::AlreadyInSignatories);
 				multisig.signatories.push(new_member.clone());
