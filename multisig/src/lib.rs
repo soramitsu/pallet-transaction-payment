@@ -61,6 +61,7 @@ use frame_system::{self as system, ensure_signed, RawOrigin};
 use sp_runtime::{DispatchResult, traits::{Dispatchable, Zero}, Percent, FixedU128, FixedPointNumber};
 #[cfg(feature = "std")]
 use sp_runtime::{Serialize, Deserialize};
+use frame_support::sp_runtime::DispatchError;
 
 mod tests;
 mod benchmarking;
@@ -334,22 +335,7 @@ decl_module! {
         #[weight = (0, Pays::No)]
 		pub fn register_multisig(origin, signatories: Vec<T::AccountId>, threshold: Percent) -> DispatchResult {
 			let who = ensure_signed(origin)?;
-			let block_num = <system::Module<T>>::block_number();
-			let nonce = <system::Module<T>>::account_nonce(&who);
-			let multisig_account_id = Self::multi_account_id(
-				&who,
-				block_num,
-				nonce
-			);
-			ensure!(Self::accounts(&multisig_account_id).is_none(), Error::<T>::MultisigAlreadyExists);
-			ensure!(!threshold.is_zero(), Error::<T>::ZeroThreshold);
-			let max_sigs = T::MaxSignatories::get() as usize;
-			ensure!(signatories.len() <= max_sigs, Error::<T>::TooManySignatories);
-			ensure!(signatories.contains(&who), Error::<T>::SenderNotInSignatories);
-			ensure!(Self::is_sort_and_unique(&signatories), Error::<T>::SignatoriesAreNotUniqueOrUnordered);
-			let multisig_config = MultisigAccount::new(signatories, threshold);
-			<Accounts<T>>::insert(&multisig_account_id, multisig_config);
-			Self::deposit_event(RawEvent::MultisigAccountCreated(multisig_account_id));
+			Self::register_multisig_inner(who, signatories, threshold)?;
 			Ok(())
 		}
 
@@ -628,6 +614,26 @@ decl_module! {
 }
 
 impl<T: Trait> Module<T> {
+    pub fn register_multisig_inner(creator: T::AccountId, signatories: Vec<T::AccountId>, threshold: Percent) -> Result<T::AccountId, DispatchError> {
+		let block_num = <system::Module<T>>::block_number();
+		let nonce = <system::Module<T>>::account_nonce(&creator);
+		let multisig_account_id = Self::multi_account_id(
+			&creator,
+			block_num,
+			nonce
+		);
+		ensure!(Self::accounts(&multisig_account_id).is_none(), Error::<T>::MultisigAlreadyExists);
+		ensure!(!threshold.is_zero(), Error::<T>::ZeroThreshold);
+		let max_sigs = T::MaxSignatories::get() as usize;
+		ensure!(signatories.len() <= max_sigs, Error::<T>::TooManySignatories);
+		ensure!(signatories.contains(&creator), Error::<T>::SenderNotInSignatories);
+		ensure!(Self::is_sort_and_unique(&signatories), Error::<T>::SignatoriesAreNotUniqueOrUnordered);
+		let multisig_config = MultisigAccount::new(signatories, threshold);
+		<Accounts<T>>::insert(&multisig_account_id, multisig_config);
+		Self::deposit_event(RawEvent::MultisigAccountCreated(multisig_account_id.clone()));
+		Ok(multisig_account_id)
+	}
+
 	/// Derive a multi-account ID from the sorted list of accounts and the threshold that are
 	/// required.
 	///
