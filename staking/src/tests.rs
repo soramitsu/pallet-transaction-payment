@@ -1718,7 +1718,7 @@ fn bond_with_little_staked_value_bounded() {
 			assert_ok!(Staking::chill(Origin::signed(30)));
 			assert_ok!(Staking::set_payee(Origin::signed(10), RewardDestination::Controller));
 			let init_balance_2 = Balances::free_balance(&2);
-			let init_balance_10 = Balances::free_balance(&10);
+			let _init_balance_10 = Balances::free_balance(&10);
 
 			// Stingy validator.
 			assert_ok!(Staking::bond(Origin::signed(1), 2, 1, RewardDestination::Controller));
@@ -4177,8 +4177,8 @@ fn claim_reward_at_the_last_era_and_no_double_claim_and_invalid_claim() {
 	// * an invalid era to claim doesn't update last_reward
 	// * double claim of one era fails
 	ExtBuilder::default().nominate(true).build_and_execute(|| {
-		let init_balance_10 = Balances::total_balance(&10);
-		let init_balance_100 = Balances::total_balance(&100);
+		let _init_balance_10 = Balances::total_balance(&10);
+		let _init_balance_100 = Balances::total_balance(&100);
 
 		let part_for_10 = Perbill::from_rational_approximation::<u32>(1000, 1125);
 		let part_for_100 = Perbill::from_rational_approximation::<u32>(125, 1125);

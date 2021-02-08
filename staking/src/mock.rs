@@ -300,8 +300,8 @@ parameter_types! {
 	pub const ValTokenId: u32 = VAL_TOKEN_ID;
 	pub const TestValRewardCurve: ValRewardCurve = ValRewardCurve {
 		duration_to_reward_flatline: Duration::from_millis(100_000),
-		min_val_burned_percentage_reward: Percent::from_percent(35),
-		max_val_burned_percentage_reward: Percent::from_percent(90),
+		min_val_burned_percentage_reward: Percent::from_parts(35),
+		max_val_burned_percentage_reward: Percent::from_parts(90),
 	};
 }
 
@@ -709,8 +709,8 @@ pub(crate) fn start_era(era_index: EraIndex) {
 }
 
 pub(crate) fn current_total_payout(duration_since_genesis: Duration, era_val_burned: Balance) -> Balance {
-	let val_burned_percentage = <Test as Trait>::ValRewardCurve::get().current_reward_percentage(duration_since_genesis);
-	(era_val_burned as f64 * val_burned_percentage) as u128
+	let val_burned_percentage: Perbill = <Test as Trait>::ValRewardCurve::get().current_reward_coefficient(duration_since_genesis);
+	val_burned_percentage * era_val_burned
 }
 
 pub(crate) fn reward_all_elected() {
