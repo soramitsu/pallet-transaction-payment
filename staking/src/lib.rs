@@ -306,7 +306,7 @@ use sp_runtime::{
 	Percent, Perbill, PerU16, PerThing, RuntimeDebug, DispatchError,
 	traits::{
 		Convert, Zero, StaticLookup, CheckedSub, Saturating, SaturatedConversion,
-		AtLeast32BitUnsigned, Dispatchable, UniqueSaturatedInto
+		AtLeast32BitUnsigned, Dispatchable,
 	},
 	transaction_validity::{
 		TransactionValidityError, TransactionValidity, ValidTransaction, InvalidTransaction,
@@ -354,10 +354,6 @@ macro_rules! log {
 /// CurrencyId type for MultiCurrency.
 type MultiCurrencyIdOf<T> =
     <<T as Trait>::MultiCurrency as MultiCurrency<<T as frame_system::Trait>::AccountId>>::CurrencyId;
-
-/// Amount type for MultiCurrency.
-type MultiCurrencyAmountOf<T> =
-	<<T as Trait>::MultiCurrency as MultiCurrencyExtended<<T as frame_system::Trait>::AccountId>>::Amount;
 	
 /// The balance type for MultiCurrency.
 pub type MultiCurrencyBalanceOf<T> = <<T as Trait>::MultiCurrency as MultiCurrency<<T as frame_system::Trait>::AccountId>>::Balance;
@@ -925,16 +921,20 @@ pub struct ValRewardCurve {
 	pub max_val_burned_percentage_reward: Percent,
 }
 
+#[allow(non_snake_case)]
 impl ValRewardCurve {
-	pub fn current_reward_percentage(&self, duration_since_genesis: Duration) -> f64 {
-		let min_val_burned_percentage: f64 = self.min_val_burned_percentage_reward.deconstruct() as f64 / 100f64;
-		let max_val_burned_percentage: f64 = self.max_val_burned_percentage_reward.deconstruct() as f64 / 100f64;
+	pub fn current_reward_coefficient(&self, duration_since_genesis: Duration) -> Perbill {
 		if duration_since_genesis >= self.duration_to_reward_flatline {
-			min_val_burned_percentage
+			Perbill::from_percent(self.min_val_burned_percentage_reward.deconstruct() as u32)
 		} else {
-			max_val_burned_percentage 
-				- (max_val_burned_percentage - min_val_burned_percentage)
-				* duration_since_genesis.as_secs_f64() / self.duration_to_reward_flatline.as_secs_f64()
+			let min_percentage = self.min_val_burned_percentage_reward.deconstruct() as u64;
+			let max_percentage = self.max_val_burned_percentage_reward.deconstruct() as u64;
+			let five_years = self.duration_to_reward_flatline.as_secs();
+			let elapsed = duration_since_genesis.as_secs();
+			Perbill::from_rational_approximation(
+				max_percentage * (five_years - elapsed) + min_percentage * elapsed,
+				100_u64 * five_years,
+			)
 		}
 	}
 }
@@ -2417,8 +2417,8 @@ impl<T: Trait> Module<T> {
 
 		// Note: if era has no reward to be claimed, era may be future. better not to update
 		// `ledger.claimed_rewards` in this case.
-		let era_payout: u128 = <ErasValidatorReward<T>>::get(&era)
-			.ok_or_else(|| Error::<T>::InvalidEraToReward)?.unique_saturated_into();
+		let era_payout: MultiCurrencyBalanceOf<T> = <ErasValidatorReward<T>>::get(&era)
+			.ok_or_else(|| Error::<T>::InvalidEraToReward)?;
 
 		let controller = Self::bonded(&validator_stash).ok_or(Error::<T>::NotStash)?;
 		let mut ledger = <Ledger<T>>::get(&controller).ok_or_else(|| Error::<T>::NotController)?;
@@ -2477,7 +2477,7 @@ impl<T: Trait> Module<T> {
 		// We can now make total validator payout:
 		if let Some(imbalance) = Self::make_payout(
 			&ledger.stash,
-			(validator_staking_payout + validator_commission_payout).unique_saturated_into()
+			validator_staking_payout + validator_commission_payout
 		) {
 			Self::deposit_event(RawEvent::Reward(ledger.stash, imbalance));
 		}
@@ -2493,7 +2493,7 @@ impl<T: Trait> Module<T> {
 			let nominator_reward = nominator_exposure_part * validator_leftover_payout;
 			// We can now make nominator payout:
 			if let Some(imbalance) = Self::make_payout(&nominator.who,
-				 nominator_reward.unique_saturated_into()) {
+				 nominator_reward) {
 				Self::deposit_event(RawEvent::Reward(nominator.who.clone(), imbalance));
 			}
 		}
@@ -2859,15 +2859,15 @@ impl<T: Trait> Module<T> {
 
 	/// Compute payout for era.
 	fn end_era(active_era: ActiveEraInfo, _session_index: SessionIndex) {
-		// This era reward percentage = 90% - (90% - 35%) * time passed after start / 5 years 
+		// This era reward percentage = 90% - (90% - 35%) * `time_since_genesis` / 5_years
 		// Note: active_era_start can be None if end era is called during genesis config.
 		if let Some(active_era_start) = active_era.start {
 			let time_since_genesis = TimeSinceGenesis::get() 
 				+ Duration::from_millis(T::UnixTime::now().as_millis().saturated_into::<u64>() - active_era_start);
 			TimeSinceGenesis::put(time_since_genesis);
-			let val_burned_percentage = T::ValRewardCurve::get().current_reward_percentage(time_since_genesis);
-			let era_val_burned: u128 = EraValBurned::<T>::get().unique_saturated_into();
-			let validator_payout: MultiCurrencyBalanceOf<T> = ((era_val_burned as f64 * val_burned_percentage) as u128).unique_saturated_into();
+			let val_burned_percentage = T::ValRewardCurve::get().current_reward_coefficient(time_since_genesis);
+			let era_val_burned = EraValBurned::<T>::get();
+			let validator_payout = val_burned_percentage * era_val_burned;
 
 			Self::deposit_event(RawEvent::EraPayout(active_era.index, validator_payout));
 
