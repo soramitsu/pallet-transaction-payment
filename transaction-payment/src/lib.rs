@@ -675,7 +675,7 @@ mod tests {
         type MaximumBlockLength = MaximumBlockLength;
         type AvailableBlockRatio = AvailableBlockRatio;
         type Version = ();
-        type AccountData = pallet_balances::AccountData<u64>;
+        type AccountData = pallet_balances::AccountData<u128>;
         type OnNewAccount = ();
         type OnKilledAccount = ();
         type SystemWeightInfo = ();
@@ -683,11 +683,11 @@ mod tests {
     }
 
     parameter_types! {
-        pub const ExistentialDeposit: u64 = 1;
+        pub const ExistentialDeposit: u128 = 1;
     }
 
     impl pallet_balances::Trait for Runtime {
-        type Balance = u64;
+        type Balance = u128;
         type Event = Event;
         type DustRemoval = ();
         type ExistentialDeposit = ExistentialDeposit;
@@ -696,20 +696,20 @@ mod tests {
         type MaxLocks = ();
     }
     thread_local! {
-        static TRANSACTION_BYTE_FEE: RefCell<u64> = RefCell::new(1);
-        static WEIGHT_TO_FEE: RefCell<u64> = RefCell::new(1);
+        static TRANSACTION_BYTE_FEE: RefCell<u128> = RefCell::new(1);
+        static WEIGHT_TO_FEE: RefCell<u128> = RefCell::new(1);
     }
 
     pub struct TransactionByteFee;
-    impl Get<u64> for TransactionByteFee {
-        fn get() -> u64 {
+    impl Get<u128> for TransactionByteFee {
+        fn get() -> u128 {
             TRANSACTION_BYTE_FEE.with(|v| *v.borrow())
         }
     }
 
     pub struct WeightToFee;
     impl WeightToFeePolynomial for WeightToFee {
-        type Balance = u64;
+        type Balance = u128;
 
         fn polynomial() -> WeightToFeeCoefficients<Self::Balance> {
             smallvec![WeightToFeeCoefficient {
@@ -734,10 +734,10 @@ mod tests {
     type TransactionPayment = Module<Runtime>;
 
     pub struct ExtBuilder {
-        balance_factor: u64,
+        balance_factor: u128,
         base_weight: u64,
-        byte_fee: u64,
-        weight_to_fee: u64,
+        byte_fee: u128,
+        weight_to_fee: u128,
     }
 
     impl Default for ExtBuilder {
@@ -756,15 +756,15 @@ mod tests {
             self.base_weight = base_weight;
             self
         }
-        pub fn byte_fee(mut self, byte_fee: u64) -> Self {
+        pub fn byte_fee(mut self, byte_fee: u128) -> Self {
             self.byte_fee = byte_fee;
             self
         }
-        pub fn weight_fee(mut self, weight_to_fee: u64) -> Self {
+        pub fn weight_fee(mut self, weight_to_fee: u128) -> Self {
             self.weight_to_fee = weight_to_fee;
             self
         }
-        pub fn balance_factor(mut self, factor: u64) -> Self {
+        pub fn balance_factor(mut self, factor: u128) -> Self {
             self.balance_factor = factor;
             self
         }
@@ -911,7 +911,7 @@ mod tests {
                 // fee will be proportional to what is the actual maximum weight in the runtime.
                 assert_eq!(
                     Balances::free_balance(&1),
-                    (10000 - <Runtime as frame_system::Trait>::MaximumBlockWeight::get()) as u64
+                    (10000 - <Runtime as frame_system::Trait>::MaximumBlockWeight::get()) as u128
                 );
             });
     }
@@ -998,8 +998,8 @@ mod tests {
                         weight: info.weight,
                         class: info.class,
                         partial_fee: 5 * 2 /* base * weight_fee */
-						+ len as u64  /* len * 1 */
-						+ info.weight.min(MaximumBlockWeight::get()) as u64 * 2 * 3 / 2 /* weight */
+						+ len as u128  /* len * 1 */
+						+ info.weight.min(MaximumBlockWeight::get()) as u128 * 2 * 3 / 2 /* weight */
                     },
                 );
             });
@@ -1127,9 +1127,9 @@ mod tests {
                     Module::<Runtime>::compute_fee(
                         <u32>::max_value(),
                         &dispatch_info,
-                        <u64>::max_value()
+                        <u128>::max_value()
                     ),
-                    <u64>::max_value()
+                    <u128>::max_value()
                 );
             });
     }
