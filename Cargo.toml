@@ -1,6 +1,5 @@
 [workspace]
 members = [
-    "transaction-payment",
     "staking",
     "multisig",
 ]
