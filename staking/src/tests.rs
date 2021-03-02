@@ -4211,9 +4211,7 @@ fn claim_reward_at_the_last_era_and_no_double_claim_and_invalid_claim() {
 		// only era 1 and 2 can be rewarded.
 
 		let balance_10 = Tokens::total_balance(VAL_TOKEN_ID, &10);
-		println!("parts_for_10: {:?}, total_payout_1: {}, total_payout_2: {}", part_for_10, total_payout_1, total_payout_2);
 		let expected_balance_10 = part_for_10 * (total_payout_1 + total_payout_2);
-		println!("balance: {}, expected: {}", balance_10, expected_balance_10);
 		assert!(
 			balance_10 <= expected_balance_10 + 1 && balance_10 >= expected_balance_10 - 1
 		);

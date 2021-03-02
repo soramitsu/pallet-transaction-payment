@@ -810,7 +810,6 @@ impl ValRewardCurve {
 			let max_percentage = self.max_val_burned_percentage_reward.deconstruct() as u64;
 			let five_years = self.duration_to_reward_flatline.as_secs();
 			let elapsed = duration_since_genesis.as_secs();
-			println!("min_percentage: {:?}, max_percentage: {:?}, five_years: {:?}, elapsed: {:?}", min_percentage, max_percentage, five_years, elapsed);
 			Perbill::from_rational_approximation(
 				max_percentage * (five_years - elapsed) + min_percentage * elapsed,
 				100_u64 * five_years,
@@ -1444,7 +1443,6 @@ decl_module! {
 			if let Some(mut active_era) = Self::active_era() {
 				if active_era.start.is_none() {
 					let now_as_millis_u64 = T::UnixTime::now().as_millis().saturated_into::<u64>();
-					println!("now_as_millis_u64: {}", now_as_millis_u64);
 					active_era.start = Some(now_as_millis_u64);
 					// This write only ever happens once, we don't include it in the weight in general
 					ActiveEra::put(active_era);
@@ -2462,7 +2460,6 @@ impl<T: Config> Module<T> {
 			&ledger.stash,
 			validator_staking_payout + validator_commission_payout
 		) {
-			println!("ledger: {:?}, imbalance: {:?}", ledger, imbalance);
 			Self::deposit_event(RawEvent::Reward(ledger.stash, imbalance));
 		}
 
@@ -2477,7 +2474,6 @@ impl<T: Config> Module<T> {
 			let nominator_reward: MultiCurrencyBalanceOf<T> = nominator_exposure_part * validator_leftover_payout;
 			// We can now make nominator payout:
 			if let Some(imbalance) = Self::make_payout(&nominator.who, nominator_reward) {
-				println!("nominator: {:?}, imbalance: {:?}", nominator.who, imbalance);
 				Self::deposit_event(RawEvent::Reward(nominator.who.clone(), imbalance));
 			}
 		}
@@ -2511,7 +2507,6 @@ impl<T: Config> Module<T> {
 	/// to pay the right payee for the given staker account.
 	fn make_payout(stash: &T::AccountId, amount: MultiCurrencyBalanceOf<T>) -> Option<MultiCurrencyBalanceOf<T>> {
 		let dest = Self::payee(stash);
-		println!("dest = {:?}", dest);
 		match dest {
 			RewardDestination::Controller => Self::bonded(stash)
 				.and_then(|controller|
@@ -2791,7 +2786,6 @@ impl<T: Config> Module<T> {
 
 	/// End a session potentially ending an era.
 	fn end_session(session_index: SessionIndex) {
-		println!("end_session({:?})", session_index);
 		if let Some(active_era) = Self::active_era() {
 			if let Some(next_active_era_start_session_index) =
 				Self::eras_start_session_index(active_era.index + 1)
@@ -2849,14 +2843,12 @@ impl<T: Config> Module<T> {
 		// This era reward percentage = 90% - (90% - 35%) * `time_since_genesis` / 5_years
 		// Note: active_era_start can be None if end era is called during genesis config.
 		if let Some(active_era_start) = active_era.start {
-			println!("time: {:?}", T::UnixTime::now().as_millis().saturated_into::<u64>());
 			let time_since_genesis = TimeSinceGenesis::get() 
 				+ Duration::from_millis(T::UnixTime::now().as_millis().saturated_into::<u64>() - active_era_start);
 			if time_since_genesis == Duration::from_secs(14) {
 				panic!();
 			}
 			TimeSinceGenesis::put(time_since_genesis);
-			println!("time_since_genesis: {:?}", time_since_genesis);
 			let val_burned_percentage = T::ValRewardCurve::get().current_reward_coefficient(time_since_genesis);
 			let era_val_burned = EraValBurned::<T>::get();
 			let validator_payout = val_burned_percentage * era_val_burned;
@@ -3274,7 +3266,6 @@ impl<T: Config> pallet_session::SessionManager<T::AccountId> for Module<T> {
 			<frame_system::Module<T>>::block_number(),
 			end_index
 		);
-		println!("SessionManager end_session({:?})", end_index);
 		Self::end_session(end_index)
 	}
 }
@@ -3298,7 +3289,6 @@ impl<T: Config> historical::SessionManager<T::AccountId, Exposure<T::AccountId, 
 		<Self as pallet_session::SessionManager<_>>::start_session(start_index)
 	}
 	fn end_session(end_index: SessionIndex) {
-		println!("SessionManager end_session({:?})", end_index);
 		<Self as pallet_session::SessionManager<_>>::end_session(end_index)
 	}
 }

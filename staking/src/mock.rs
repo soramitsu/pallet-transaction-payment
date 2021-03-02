@@ -944,7 +944,6 @@ pub(crate) fn prepare_submission_with(
 			.iter()
 			.position(|x| x == a)
 			.map_or_else(
-				|| { println!("unable to find nominator index for {:?}", a); None },
 				|i| Some(i as NominatorIndex),
 			)
 	};
@@ -953,7 +952,6 @@ pub(crate) fn prepare_submission_with(
 			.iter()
 			.position(|x| x == a)
 			.map_or_else(
-				|| { println!("unable to find validator index for {:?}", a); None },
 				|i| Some(i as ValidatorIndex),
 			)
 	};
