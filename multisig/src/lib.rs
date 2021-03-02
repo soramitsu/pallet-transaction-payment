@@ -60,7 +60,7 @@ use frame_support::{
     },
 };
 use frame_system::{self as system, ensure_signed, RawOrigin};
-use sp_core::blake2_256;
+use sp_io::hashing::blake2_256;
 use sp_runtime::{
     traits::{Dispatchable, Zero},
     FixedPointNumber, FixedU128, Percent,
