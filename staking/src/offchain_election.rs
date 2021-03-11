@@ -19,16 +19,19 @@
 
 use codec::Decode;
 use crate::{
-	Call, CompactAssignments, Module, NominatorIndex, OffchainAccuracy, Trait, ValidatorIndex,
-	ElectionSize,
+	Call, CompactAssignments, Module, NominatorIndex, OffchainAccuracy, Trait,
+	ValidatorIndex, ElectionSize,
 };
 use frame_system::offchain::SubmitTransaction;
 use sp_npos_elections::{
-	build_support_map, evaluate_support, reduce, Assignment, ExtendedBalance, ElectionResult,
-	ElectionScore, balance_solution,
+	build_support_map, evaluate_support, reduce, Assignment, ExtendedBalance,
+	ElectionResult, ElectionScore, balance_solution,
 };
 use sp_runtime::offchain::storage::StorageValueRef;
-use sp_runtime::{PerThing, RuntimeDebug, traits::{TrailingZeroInput, Zero}};
+use sp_runtime::{
+	PerThing, RuntimeDebug,
+	traits::{TrailingZeroInput, Zero},
+};
 use frame_support::traits::Get;
 use sp_std::{convert::TryInto, prelude::*};
 
@@ -74,8 +77,8 @@ pub(crate) fn set_check_offchain_execution_status<T: Trait>(
 	let storage = StorageValueRef::persistent(&OFFCHAIN_HEAD_DB);
 	let threshold = T::BlockNumber::from(OFFCHAIN_REPEAT);
 
-	let mutate_stat =
-		storage.mutate::<_, &'static str, _>(|maybe_head: Option<Option<T::BlockNumber>>| {
+	let mutate_stat = storage.mutate::<_, &'static str, _>(
+		|maybe_head: Option<Option<T::BlockNumber>>| {
 			match maybe_head {
 				Some(Some(head)) if now < head => Err("fork."),
 				Some(Some(head)) if now >= head && now <= head + threshold => {
@@ -90,7 +93,8 @@ pub(crate) fn set_check_offchain_execution_status<T: Trait>(
 					Ok(now)
 				}
 			}
-		});
+		},
+	);
 
 	match mutate_stat {
 		// all good
@@ -107,14 +111,13 @@ pub(crate) fn set_check_offchain_execution_status<T: Trait>(
 /// unsigned transaction, without any signature.
 pub(crate) fn compute_offchain_election<T: Trait>() -> Result<(), OffchainElectionError> {
 	// compute raw solution. Note that we use `OffchainAccuracy`.
-	let ElectionResult {
-		winners,
-		assignments,
-	} = <Module<T>>::do_phragmen::<OffchainAccuracy>()
-		.ok_or(OffchainElectionError::ElectionFailed)?;
+	let ElectionResult { winners, assignments } =
+		<Module<T>>::do_phragmen::<OffchainAccuracy>()
+			.ok_or(OffchainElectionError::ElectionFailed)?;
 
 	// process and prepare it for submission.
-	let (winners, compact, score, size) = prepare_submission::<T>(assignments, winners, true)?;
+	let (winners, compact, score, size) =
+		prepare_submission::<T>(assignments, winners, true)?;
 
 	// defensive-only: current era can never be none except genesis.
 	let current_era = <Module<T>>::current_era().unwrap_or_default();
@@ -126,12 +129,12 @@ pub(crate) fn compute_offchain_election<T: Trait>() -> Result<(), OffchainElecti
 		score,
 		current_era,
 		size,
-	).into();
+	)
+	.into();
 
 	SubmitTransaction::<T, Call<T>>::submit_unsigned_transaction(call)
 		.map_err(|_| OffchainElectionError::PoolSubmissionFailed)
 }
-
 
 /// Takes an election result and spits out some data that can be submitted to the chain.
 ///
@@ -140,19 +143,18 @@ pub fn prepare_submission<T: Trait>(
 	assignments: Vec<Assignment<T::AccountId, OffchainAccuracy>>,
 	winners: Vec<(T::AccountId, ExtendedBalance)>,
 	do_reduce: bool,
-) -> Result<(
-	Vec<ValidatorIndex>,
-	CompactAssignments,
-	ElectionScore,
-	ElectionSize,
-), OffchainElectionError> where
+) -> Result<
+	(Vec<ValidatorIndex>, CompactAssignments, ElectionScore, ElectionSize),
+	OffchainElectionError,
+>
+where
 	ExtendedBalance: From<<OffchainAccuracy as PerThing>::Inner>,
 {
 	// make sure that the snapshot is available.
-	let snapshot_validators =
-		<Module<T>>::snapshot_validators().ok_or(OffchainElectionError::SnapshotUnavailable)?;
-	let snapshot_nominators =
-		<Module<T>>::snapshot_nominators().ok_or(OffchainElectionError::SnapshotUnavailable)?;
+	let snapshot_validators = <Module<T>>::snapshot_validators()
+		.ok_or(OffchainElectionError::SnapshotUnavailable)?;
+	let snapshot_nominators = <Module<T>>::snapshot_nominators()
+		.ok_or(OffchainElectionError::SnapshotUnavailable)?;
 
 	// all helper closures
 	let nominator_index = |a: &T::AccountId| -> Option<NominatorIndex> {
@@ -187,7 +189,8 @@ pub fn prepare_submission<T: Trait>(
 		iterations @ _ => {
 			let seed = sp_io::offchain::random_seed();
 			let iterations = <u32>::decode(&mut TrailingZeroInput::new(seed.as_ref()))
-				.expect("input is padded with zeroes; qed") % iterations.saturating_add(1);
+				.expect("input is padded with zeroes; qed")
+				% iterations.saturating_add(1);
 			balance_solution(
 				&mut staked,
 				&mut support_map,
@@ -203,8 +206,9 @@ pub fn prepare_submission<T: Trait>(
 	}
 
 	// Convert back to ratio assignment. This takes less space.
-	let low_accuracy_assignment = sp_npos_elections::assignment_staked_to_ratio_normalized(staked)
-		.map_err(|e| OffchainElectionError::from(e))?;
+	let low_accuracy_assignment =
+		sp_npos_elections::assignment_staked_to_ratio_normalized(staked)
+			.map_err(|e| OffchainElectionError::from(e))?;
 
 	// convert back to staked to compute the score in the receiver's accuracy. This can be done
 	// nicer, for now we do it as such since this code is not time-critical. This ensure that the
@@ -229,15 +233,15 @@ pub fn prepare_submission<T: Trait>(
 		low_accuracy_assignment,
 		nominator_index,
 		validator_index,
-	).map_err(|e| OffchainElectionError::from(e))?;
+	)
+	.map_err(|e| OffchainElectionError::from(e))?;
 
 	// winners to index. Use a simple for loop for a more expressive early exit in case of error.
 	let mut winners_indexed: Vec<ValidatorIndex> = Vec::with_capacity(winners.len());
 	for w in winners {
 		if let Some(idx) = snapshot_validators.iter().position(|v| *v == w) {
-			let compact_index: ValidatorIndex = idx
-				.try_into()
-				.map_err(|_| OffchainElectionError::InvalidWinner)?;
+			let compact_index: ValidatorIndex =
+				idx.try_into().map_err(|_| OffchainElectionError::InvalidWinner)?;
 			winners_indexed.push(compact_index);
 		} else {
 			return Err(OffchainElectionError::InvalidWinner);

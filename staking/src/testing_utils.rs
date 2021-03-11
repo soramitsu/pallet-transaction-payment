@@ -23,13 +23,20 @@ use crate::Module as Staking;
 use frame_benchmarking::{account};
 use frame_system::RawOrigin;
 use sp_io::hashing::blake2_256;
-use rand_chacha::{rand_core::{RngCore, SeedableRng}, ChaChaRng};
+use rand_chacha::{
+	rand_core::{RngCore, SeedableRng},
+	ChaChaRng,
+};
 use sp_npos_elections::*;
 
 const SEED: u32 = 0;
 
 /// Grab a funded user.
-pub fn create_funded_user<T: Trait>(string: &'static str, n: u32, balance_factor: u32) -> T::AccountId {
+pub fn create_funded_user<T: Trait>(
+	string: &'static str,
+	n: u32,
+	balance_factor: u32,
+) -> T::AccountId {
 	let user = account(string, n, SEED);
 	let balance = T::Currency::minimum_balance() * balance_factor.into();
 	T::Currency::make_free_balance_be(&user, balance);
@@ -39,31 +46,45 @@ pub fn create_funded_user<T: Trait>(string: &'static str, n: u32, balance_factor
 }
 
 /// Create a stash and controller pair.
-pub fn create_stash_controller<T: Trait>(n: u32, balance_factor: u32)
-	-> Result<(T::AccountId, T::AccountId), &'static str>
-{
+pub fn create_stash_controller<T: Trait>(
+	n: u32,
+	balance_factor: u32,
+) -> Result<(T::AccountId, T::AccountId), &'static str> {
 	let stash = create_funded_user::<T>("stash", n, balance_factor);
 	let controller = create_funded_user::<T>("controller", n, balance_factor);
-	let controller_lookup: <T::Lookup as StaticLookup>::Source = T::Lookup::unlookup(controller.clone());
+	let controller_lookup: <T::Lookup as StaticLookup>::Source =
+		T::Lookup::unlookup(controller.clone());
 	let reward_destination = RewardDestination::Stash;
 	let amount = T::Currency::minimum_balance() * (balance_factor / 10).max(1).into();
-	Staking::<T>::bond(RawOrigin::Signed(stash.clone()).into(), controller_lookup, amount, reward_destination)?;
-	return Ok((stash, controller))
+	Staking::<T>::bond(
+		RawOrigin::Signed(stash.clone()).into(),
+		controller_lookup,
+		amount,
+		reward_destination,
+	)?;
+	return Ok((stash, controller));
 }
 
 /// Create a stash and controller pair, where the controller is dead, and payouts go to controller.
 /// This is used to test worst case payout scenarios.
-pub fn create_stash_and_dead_controller<T: Trait>(n: u32, balance_factor: u32)
-	-> Result<(T::AccountId, T::AccountId), &'static str>
-{
+pub fn create_stash_and_dead_controller<T: Trait>(
+	n: u32,
+	balance_factor: u32,
+) -> Result<(T::AccountId, T::AccountId), &'static str> {
 	let stash = create_funded_user::<T>("stash", n, balance_factor);
 	// controller has no funds
 	let controller = create_funded_user::<T>("controller", n, 0);
-	let controller_lookup: <T::Lookup as StaticLookup>::Source = T::Lookup::unlookup(controller.clone());
+	let controller_lookup: <T::Lookup as StaticLookup>::Source =
+		T::Lookup::unlookup(controller.clone());
 	let reward_destination = RewardDestination::Controller;
 	let amount = T::Currency::minimum_balance() * (balance_factor / 10).max(1).into();
-	Staking::<T>::bond(RawOrigin::Signed(stash.clone()).into(), controller_lookup, amount, reward_destination)?;
-	return Ok((stash, controller))
+	Staking::<T>::bond(
+		RawOrigin::Signed(stash.clone()).into(),
+		controller_lookup,
+		amount,
+		reward_destination,
+	)?;
+	return Ok((stash, controller));
 }
 
 /// create `max` validators.
@@ -71,14 +92,14 @@ pub fn create_validators<T: Trait>(
 	max: u32,
 	balance_factor: u32,
 ) -> Result<Vec<<T::Lookup as StaticLookup>::Source>, &'static str> {
-	let mut validators: Vec<<T::Lookup as StaticLookup>::Source> = Vec::with_capacity(max as usize);
-	for i in 0 .. max {
+	let mut validators: Vec<<T::Lookup as StaticLookup>::Source> =
+		Vec::with_capacity(max as usize);
+	for i in 0..max {
 		let (stash, controller) = create_stash_controller::<T>(i, balance_factor)?;
-		let validator_prefs = ValidatorPrefs {
-			commission: Perbill::from_percent(50),
-		};
+		let validator_prefs = ValidatorPrefs { commission: Perbill::from_percent(50) };
 		Staking::<T>::validate(RawOrigin::Signed(controller).into(), validator_prefs)?;
-		let stash_lookup: <T::Lookup as StaticLookup>::Source = T::Lookup::unlookup(stash);
+		let stash_lookup: <T::Lookup as StaticLookup>::Source =
+			T::Lookup::unlookup(stash);
 		validators.push(stash_lookup);
 	}
 	Ok(validators)
@@ -103,19 +124,22 @@ pub fn create_validators_with_nominators_for_era<T: Trait>(
 	randomize_stake: bool,
 	to_nominate: Option<u32>,
 ) -> Result<Vec<<T::Lookup as StaticLookup>::Source>, &'static str> {
-	let mut validators_stash: Vec<<T::Lookup as StaticLookup>::Source>
-		= Vec::with_capacity(validators as usize);
+	let mut validators_stash: Vec<<T::Lookup as StaticLookup>::Source> =
+		Vec::with_capacity(validators as usize);
 	let mut rng = ChaChaRng::from_seed(SEED.using_encoded(blake2_256));
 
 	// Create validators
-	for i in 0 .. validators {
-		let balance_factor = if randomize_stake { rng.next_u32() % 255 + 10 } else { 100u32 };
+	for i in 0..validators {
+		let balance_factor =
+			if randomize_stake { rng.next_u32() % 255 + 10 } else { 100u32 };
 		let (v_stash, v_controller) = create_stash_controller::<T>(i, balance_factor)?;
-		let validator_prefs = ValidatorPrefs {
-			commission: Perbill::from_percent(50),
-		};
-		Staking::<T>::validate(RawOrigin::Signed(v_controller.clone()).into(), validator_prefs)?;
-		let stash_lookup: <T::Lookup as StaticLookup>::Source = T::Lookup::unlookup(v_stash.clone());
+		let validator_prefs = ValidatorPrefs { commission: Perbill::from_percent(50) };
+		Staking::<T>::validate(
+			RawOrigin::Signed(v_controller.clone()).into(),
+			validator_prefs,
+		)?;
+		let stash_lookup: <T::Lookup as StaticLookup>::Source =
+			T::Lookup::unlookup(v_stash.clone());
 		validators_stash.push(stash_lookup.clone());
 	}
 
@@ -123,31 +147,32 @@ pub fn create_validators_with_nominators_for_era<T: Trait>(
 	let validator_choosen = validators_stash[0..to_nominate].to_vec();
 
 	// Create nominators
-	for j in 0 .. nominators {
-		let balance_factor = if randomize_stake { rng.next_u32() % 255 + 10 } else { 100u32 };
-		let (_n_stash, n_controller) = create_stash_controller::<T>(
-			u32::max_value() - j,
-			balance_factor,
-		)?;
+	for j in 0..nominators {
+		let balance_factor =
+			if randomize_stake { rng.next_u32() % 255 + 10 } else { 100u32 };
+		let (_n_stash, n_controller) =
+			create_stash_controller::<T>(u32::max_value() - j, balance_factor)?;
 
 		// Have them randomly validate
 		let mut available_validators = validator_choosen.clone();
 		let mut selected_validators: Vec<<T::Lookup as StaticLookup>::Source> =
 			Vec::with_capacity(edge_per_nominator);
 
-		for _ in 0 .. validators.min(edge_per_nominator as u32) {
+		for _ in 0..validators.min(edge_per_nominator as u32) {
 			let selected = rng.next_u32() as usize % available_validators.len();
 			let validator = available_validators.remove(selected);
 			selected_validators.push(validator);
 		}
-		Staking::<T>::nominate(RawOrigin::Signed(n_controller.clone()).into(), selected_validators)?;
+		Staking::<T>::nominate(
+			RawOrigin::Signed(n_controller.clone()).into(),
+			selected_validators,
+		)?;
 	}
 
 	ValidatorCount::put(validators);
 
 	Ok(validator_choosen)
 }
-
 
 /// Build a _really bad_ but acceptable solution for election. This should always yield a solution
 /// which has a less score than the seq-phragmen.
@@ -216,14 +241,15 @@ pub fn get_weak_solution<T: Trait>(
 	};
 
 	// convert back to ratio assignment. This takes less space.
-	let low_accuracy_assignment = assignment_staked_to_ratio_normalized(staked_assignments)
-		.expect("Failed to normalize");
+	let low_accuracy_assignment =
+		assignment_staked_to_ratio_normalized(staked_assignments)
+			.expect("Failed to normalize");
 
 	// re-calculate score based on what the chain will decode.
 	let score = {
 		let staked = assignment_ratio_to_staked::<_, OffchainAccuracy, _>(
 			low_accuracy_assignment.clone(),
-			stake_of
+			stake_of,
 		);
 
 		let (support_map, _) =
@@ -243,12 +269,7 @@ pub fn get_weak_solution<T: Trait>(
 	let winners = winners
 		.into_iter()
 		.map(|w| {
-			snapshot_validators
-				.iter()
-				.position(|v| *v == w)
-				.unwrap()
-				.try_into()
-				.unwrap()
+			snapshot_validators.iter().position(|v| *v == w).unwrap().try_into().unwrap()
 		})
 		.collect::<Vec<ValidatorIndex>>();
 
@@ -265,23 +286,26 @@ pub fn get_weak_solution<T: Trait>(
 pub fn get_seq_phragmen_solution<T: Trait>(
 	do_reduce: bool,
 ) -> (Vec<ValidatorIndex>, CompactAssignments, ElectionScore, ElectionSize) {
-	let sp_npos_elections::ElectionResult {
-		winners,
-		assignments,
-	} = <Module<T>>::do_phragmen::<OffchainAccuracy>().unwrap();
+	let sp_npos_elections::ElectionResult { winners, assignments } =
+		<Module<T>>::do_phragmen::<OffchainAccuracy>().unwrap();
 
 	offchain_election::prepare_submission::<T>(assignments, winners, do_reduce).unwrap()
 }
 
 /// Returns a solution in which only one winner is elected with just a self vote.
 pub fn get_single_winner_solution<T: Trait>(
-	winner: T::AccountId
-) -> Result<(Vec<ValidatorIndex>, CompactAssignments, ElectionScore, ElectionSize), &'static str> {
+	winner: T::AccountId,
+) -> Result<
+	(Vec<ValidatorIndex>, CompactAssignments, ElectionScore, ElectionSize),
+	&'static str,
+> {
 	let snapshot_validators = <Module<T>>::snapshot_validators().unwrap();
 	let snapshot_nominators = <Module<T>>::snapshot_nominators().unwrap();
 
-	let val_index = snapshot_validators.iter().position(|x| *x == winner).ok_or("not a validator")?;
-	let nom_index = snapshot_nominators.iter().position(|x| *x == winner).ok_or("not a nominator")?;
+	let val_index =
+		snapshot_validators.iter().position(|x| *x == winner).ok_or("not a validator")?;
+	let nom_index =
+		snapshot_nominators.iter().position(|x| *x == winner).ok_or("not a nominator")?;
 
 	let stake = <Staking<T>>::slashable_balance_of(&winner);
 	let stake = <T::CurrencyToVote as Convert<BalanceOf<T>, VoteWeight>>::convert(stake)
@@ -291,10 +315,8 @@ pub fn get_single_winner_solution<T: Trait>(
 	let nom_index = nom_index as NominatorIndex;
 
 	let winners = vec![val_index];
-	let compact = CompactAssignments {
-		votes1: vec![(nom_index, val_index)],
-		..Default::default()
-	};
+	let compact =
+		CompactAssignments { votes1: vec![(nom_index, val_index)], ..Default::default() };
 	let score = [stake, stake, stake * stake];
 	let size = ElectionSize {
 		validators: snapshot_validators.len() as ValidatorIndex,
@@ -311,10 +333,7 @@ pub fn current_era<T: Trait>() -> EraIndex {
 
 /// initialize the first era.
 pub fn init_active_era() {
-	ActiveEra::put(ActiveEraInfo {
-		index: 1,
-		start: None,
-	})
+	ActiveEra::put(ActiveEraInfo { index: 1, start: None })
 }
 
 /// Create random assignments for the given list of winners. Each assignment will have
@@ -327,22 +346,27 @@ pub fn create_assignments_for_offchain<T: Trait>(
 		Vec<(T::AccountId, ExtendedBalance)>,
 		Vec<Assignment<T::AccountId, OffchainAccuracy>>,
 	),
-	&'static str
+	&'static str,
 > {
 	let ratio = OffchainAccuracy::from_rational_approximation(1, MAX_NOMINATIONS);
-	let assignments: Vec<Assignment<T::AccountId, OffchainAccuracy>> = <Nominators<T>>::iter()
-		.take(num_assignments as usize)
-		.map(|(n, t)| Assignment {
-			who: n,
-			distribution: t.targets.iter().map(|v| (v.clone(), ratio)).collect(),
-		})
+	let assignments: Vec<Assignment<T::AccountId, OffchainAccuracy>> =
+		<Nominators<T>>::iter()
+			.take(num_assignments as usize)
+			.map(|(n, t)| Assignment {
+				who: n,
+				distribution: t.targets.iter().map(|v| (v.clone(), ratio)).collect(),
+			})
+			.collect();
+
+	ensure!(
+		assignments.len() == num_assignments as usize,
+		"must bench for `a` assignments"
+	);
+
+	let winners = winners
+		.into_iter()
+		.map(|v| (<T::Lookup as StaticLookup>::lookup(v).unwrap(), 0))
 		.collect();
-
-	ensure!(assignments.len() == num_assignments as usize, "must bench for `a` assignments");
-
-	let winners = winners.into_iter().map(|v| {
-		(<T::Lookup as StaticLookup>::lookup(v).unwrap(), 0)
-	}).collect();
 
 	Ok((winners, assignments))
 }
