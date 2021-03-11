@@ -940,7 +940,7 @@ impl ValRewardCurve {
 }
 
 pub trait Trait: frame_system::Trait + SendTransactionTypes<Call<Self>> {
-    type ValidatorFilter: frame_support::traits::Filter<BalanceOf<Self>>;
+    type ValidatorsFilter: frame_support::traits::Filter<BalanceOf<Self>>;
 	/// The native currency - XOR.
 	type Currency: LockableCurrency<Self::AccountId, Moment=Self::BlockNumber>;
 
@@ -2938,7 +2938,7 @@ impl<T: Trait> Module<T> {
 			// Populate Stakers and write slot stake.
 			let mut total_stake: BalanceOf<T> = Zero::zero();
 			exposures.into_iter().for_each(|(stash, exposure)| {
-                if !<T::ValidatorFilter as frame_support::traits::Filter<BalanceOf<T>>>::filter(&exposure.total) { return (); }
+                if !<T::ValidatorsFilter as frame_support::traits::Filter<BalanceOf<T>>>::filter(&exposure.total) { return (); }
                 //if exposure.total < 5000u32.into() { return (); }
 				total_stake = total_stake.saturating_add(exposure.total);
 				<ErasStakers<T>>::insert(current_era, &stash, &exposure);

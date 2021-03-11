@@ -1,3 +1,6 @@
+/*
+
+
 // This file is part of Substrate.
 
 // Copyright (C) 2020 Parity Technologies (UK) Ltd.
@@ -760,3 +763,5 @@ mod tests {
 	}
 
 }
+
+*/

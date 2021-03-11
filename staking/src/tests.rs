@@ -1704,6 +1704,7 @@ fn bond_with_no_staked_value() {
 		});
 }
 
+/*
 #[test]
 fn bond_with_little_staked_value_bounded() {
 	// Behavior when someone bonds with little staked value.
@@ -1767,6 +1768,7 @@ fn bond_with_little_staked_value_bounded() {
 			);
 		});
 }
+*/
 
 #[test]
 fn bond_with_duplicate_vote_should_be_ignored_by_npos_election() {

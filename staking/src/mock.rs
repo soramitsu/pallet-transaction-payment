@@ -305,7 +305,16 @@ parameter_types! {
 	};
 }
 
+pub struct ValidatorsFilter;
+impl frame_support::traits::Filter<Balance> for ValidatorsFilter {
+    fn filter(arg: &Balance) -> bool {
+        let barrier: Balance = 50u32.into();
+        arg >= &barrier
+    }
+}
+
 impl Trait for Test {
+    type ValidatorsFilter = ValidatorsFilter;
 	type Currency = Balances;
 	type MultiCurrency = Tokens; 
 	type ValTokenId = ValTokenId;
