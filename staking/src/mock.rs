@@ -549,9 +549,9 @@ impl ExtBuilder {
 	pub fn build_and_execute(self, test: impl FnOnce() -> ()) {
 		let mut ext = self.build();
 		ext.execute_with(|| {
-            MinStakeDynamic::<Test>::set(50u32.into());
-            test();
-        });
+			MinStakeDynamic::<Test>::set(50u32.into());
+			test();
+		});
 		ext.execute_with(post_conditions);
 	}
 }

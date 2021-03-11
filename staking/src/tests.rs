@@ -1902,22 +1902,31 @@ fn bond_with_little_staked_value_bounded() {
 		.minimum_validator_count(1)
 		.build()
 		.execute_with(|| {
-            MinStakeDynamic::<Test>::set(0u32.into());
+			MinStakeDynamic::<Test>::set(0u32.into());
 			// setup
 			assert_ok!(Staking::chill(Origin::signed(30)));
-			assert_ok!(Staking::set_payee(Origin::signed(10), RewardDestination::Controller));
+			assert_ok!(Staking::set_payee(
+				Origin::signed(10),
+				RewardDestination::Controller
+			));
 			let init_balance_2 = Balances::free_balance(&2);
 			let _init_balance_10 = Balances::free_balance(&10);
 
 			// Stingy validator.
-			assert_ok!(Staking::bond(Origin::signed(1), 2, 1, RewardDestination::Controller));
+			assert_ok!(Staking::bond(
+				Origin::signed(1),
+				2,
+				1,
+				RewardDestination::Controller
+			));
 			assert_ok!(Staking::validate(Origin::signed(2), ValidatorPrefs::default()));
 
 			// Assume that 1000 val was burned as transaction fees.
 			<Staking as crate::Store>::EraValBurned::put(1000);
 
 			// Compute total payout now for whole duration as other parameter won't change
-			let total_payout_0 = current_total_payout(Duration::from_millis(3 * 1000), 1000);
+			let total_payout_0 =
+				current_total_payout(Duration::from_millis(3 * 1000), 1000);
 
 			assert!(total_payout_0 > 100); // Test is meaningful if reward something
 			reward_all_elected();
@@ -1927,7 +1936,10 @@ fn bond_with_little_staked_value_bounded() {
 			// 2 is elected.
 			assert_eq_uvec!(validator_controllers(), vec![20, 10, 2]);
 			// And has minimal stake
-			assert_eq!(Staking::eras_stakers(Staking::active_era().unwrap().index, 2).total, 0);
+			assert_eq!(
+				Staking::eras_stakers(Staking::active_era().unwrap().index, 2).total,
+				0
+			);
 
 			// Old ones are rewarded.
 			assert_eq!(Tokens::free_balance(VAL_TOKEN_ID, &10), total_payout_0 / 3);
@@ -1938,7 +1950,8 @@ fn bond_with_little_staked_value_bounded() {
 			<Staking as crate::Store>::EraValBurned::put(1000);
 
 			// Compute total payout now for whole duration as other parameter won't change
-			let total_payout_1 = current_total_payout(Duration::from_millis(6 * 1000), 1000);
+			let total_payout_1 =
+				current_total_payout(Duration::from_millis(6 * 1000), 1000);
 
 			assert!(total_payout_1 > 100); // Test is meaningful if reward something
 			reward_all_elected();
@@ -1946,9 +1959,15 @@ fn bond_with_little_staked_value_bounded() {
 			mock::make_all_reward_payment(1);
 
 			assert_eq_uvec!(validator_controllers(), vec![20, 10, 2]);
-			assert_eq!(Staking::eras_stakers(Staking::active_era().unwrap().index, 2).total, 0);
+			assert_eq!(
+				Staking::eras_stakers(Staking::active_era().unwrap().index, 2).total,
+				0
+			);
 
-			assert!(Tokens::free_balance(VAL_TOKEN_ID, &2) >= total_payout_1 / 3 - 1 && Tokens::free_balance(VAL_TOKEN_ID, &2) <= total_payout_1 / 3 + 1);
+			assert!(
+				Tokens::free_balance(VAL_TOKEN_ID, &2) >= total_payout_1 / 3 - 1
+					&& Tokens::free_balance(VAL_TOKEN_ID, &2) <= total_payout_1 / 3 + 1
+			);
 			let payout_10 = total_payout_0 / 3 + total_payout_1 / 3;
 			assert!(
 				Tokens::free_balance(VAL_TOKEN_ID, &10) >= payout_10 - 1
@@ -3800,7 +3819,7 @@ mod offchain_phragmen {
 			.has_stakers(false)
 			.build()
 			.execute_with(|| {
-                MinStakeDynamic::<Test>::set(2000u32.into());
+				MinStakeDynamic::<Test>::set(2000u32.into());
 				build_offchain_phragmen_test_ext();
 				run_to_block(12);
 
