@@ -3058,7 +3058,6 @@ impl<T: Trait> Module<T> {
 			let mut total_stake: BalanceOf<T> = Zero::zero();
 			exposures.into_iter().for_each(|(stash, exposure)| {
                 if !<T::ValidatorsFilter as frame_support::traits::Filter<BalanceOf<T>>>::filter(&exposure.total) { return (); }
-                //if exposure.total < 5000u32.into() { return (); }
 				total_stake = total_stake.saturating_add(exposure.total);
 				<ErasStakers<T>>::insert(current_era, &stash, &exposure);
 
