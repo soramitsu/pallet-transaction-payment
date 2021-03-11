@@ -1892,7 +1892,6 @@ fn bond_with_no_staked_value() {
 		});
 }
 
-/*
 #[test]
 fn bond_with_little_staked_value_bounded() {
 	// Behavior when someone bonds with little staked value.
@@ -1903,6 +1902,7 @@ fn bond_with_little_staked_value_bounded() {
 		.minimum_validator_count(1)
 		.build()
 		.execute_with(|| {
+            MinStakeDynamic::<Test>::set(0u32.into());
 			// setup
 			assert_ok!(Staking::chill(Origin::signed(30)));
 			assert_ok!(Staking::set_payee(Origin::signed(10), RewardDestination::Controller));
@@ -1956,7 +1956,6 @@ fn bond_with_little_staked_value_bounded() {
 			);
 		});
 }
-*/
 
 #[test]
 fn bond_with_duplicate_vote_should_be_ignored_by_npos_election() {
@@ -3801,6 +3800,7 @@ mod offchain_phragmen {
 			.has_stakers(false)
 			.build()
 			.execute_with(|| {
+                MinStakeDynamic::<Test>::set(2000u32.into());
 				build_offchain_phragmen_test_ext();
 				run_to_block(12);
 

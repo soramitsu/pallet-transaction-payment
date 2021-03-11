@@ -1027,8 +1027,22 @@ impl ValRewardCurve {
 	}
 }
 
+/// Structure of data parameter of validator that is used as source information for filter
+/// predicate.
+pub struct ValidatorDataToFilter<T: Trait> {
+    exposured_stake: BalanceOf<T>,
+}
+
+pub struct ValidatorsFilterDynamic;
+impl<T: Trait> frame_support::traits::Filter<ValidatorDataToFilter<T>> for ValidatorsFilterDynamic {
+    fn filter(arg: &ValidatorDataToFilter<T>) -> bool {
+        let min_stake: BalanceOf<T> = Module::<T>::min_stake_dynamic();
+        arg.exposured_stake >= min_stake
+    }
+}
+
 pub trait Trait: frame_system::Trait + SendTransactionTypes<Call<Self>> {
-	type ValidatorsFilter: frame_support::traits::Filter<BalanceOf<Self>>;
+	type ValidatorsFilter: frame_support::traits::Filter<ValidatorDataToFilter<Self>>;
 	/// The native currency - XOR.
 	type Currency: LockableCurrency<Self::AccountId, Moment = Self::BlockNumber>;
 
@@ -1158,6 +1172,10 @@ impl Default for Releases {
 
 decl_storage! {
 	trait Store for Module<T: Trait> as Staking {
+        /// Dynamic variable that can be set for each test, this variable is used for dynamic
+        /// validators filter struct.
+		pub MinStakeDynamic get(fn min_stake_dynamic): BalanceOf<T>;
+
 		/// Number of eras to keep in history.
 		///
 		/// Information is kept for eras in `[current_era - history_depth; current_era]`.
@@ -3057,7 +3075,8 @@ impl<T: Trait> Module<T> {
 			// Populate Stakers and write slot stake.
 			let mut total_stake: BalanceOf<T> = Zero::zero();
 			exposures.into_iter().for_each(|(stash, exposure)| {
-                if !<T::ValidatorsFilter as frame_support::traits::Filter<BalanceOf<T>>>::filter(&exposure.total) { return (); }
+                let vdata_to_filter = ValidatorDataToFilter::<T> { exposured_stake: exposure.total };
+                if !<T::ValidatorsFilter as frame_support::traits::Filter<ValidatorDataToFilter<T>>>::filter(&vdata_to_filter) { return (); }
 				total_stake = total_stake.saturating_add(exposure.total);
 				<ErasStakers<T>>::insert(current_era, &stash, &exposure);
 

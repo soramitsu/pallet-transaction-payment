@@ -312,16 +312,8 @@ parameter_types! {
 	};
 }
 
-pub struct ValidatorsFilter;
-impl frame_support::traits::Filter<Balance> for ValidatorsFilter {
-	fn filter(arg: &Balance) -> bool {
-		let barrier: Balance = 50u32.into();
-		arg >= &barrier
-	}
-}
-
 impl Trait for Test {
-	type ValidatorsFilter = ValidatorsFilter;
+	type ValidatorsFilter = ValidatorsFilterDynamic;
 	type Currency = Balances;
 	type MultiCurrency = Tokens;
 	type ValTokenId = ValTokenId;
@@ -556,7 +548,10 @@ impl ExtBuilder {
 	}
 	pub fn build_and_execute(self, test: impl FnOnce() -> ()) {
 		let mut ext = self.build();
-		ext.execute_with(test);
+		ext.execute_with(|| {
+            MinStakeDynamic::<Test>::set(50u32.into());
+            test();
+        });
 		ext.execute_with(post_conditions);
 	}
 }
