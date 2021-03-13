@@ -306,7 +306,6 @@ use frame_support::{
 use pallet_session::historical;
 use sp_runtime::{
 	Percent, Perbill, PerU16, RuntimeDebug, DispatchError,
-	curve::PiecewiseLinear,
 	traits::{
 		Convert, Zero, StaticLookup, CheckedSub, Saturating, SaturatedConversion,
 		AtLeast32BitUnsigned, Dispatchable,
@@ -400,15 +399,13 @@ pub type OffchainAccuracy = PerU16;
 pub type BalanceOf<T> =
 	<<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
 
-type PositiveImbalanceOf<T> =
-	<<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::PositiveImbalance;
 type NegativeImbalanceOf<T> =
 	<<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::NegativeImbalance;
 
 pub trait ValBurnedNotifier<A> {
 	fn notify_val_burned(amount: A);
 }
-	
+
 /// Information regarding the active era (era in used in session).
 #[derive(Encode, Decode, RuntimeDebug)]
 pub struct ActiveEraInfo {
@@ -789,7 +786,7 @@ impl<T: Config> SessionInterface<<T as frame_system::Config>::AccountId> for T w
 }
 
 pub struct ValRewardCurve {
-	/// The time it will take for the reward to reach `MinValBurnedPercentageReward` 
+	/// The time it will take for the reward to reach `MinValBurnedPercentageReward`
 	/// from `MaxValBurnedPercentageReward` and flatline there.
 	pub duration_to_reward_flatline: Duration,
 
@@ -817,7 +814,23 @@ impl ValRewardCurve {
 		}
 	}
 }
+
+/// Structure of data parameter of validator that is used as source information for filter
+/// predicate.
+pub struct ValidatorDataToFilter<T: Config> {
+    pub exposured_stake: BalanceOf<T>,
+}
+
+pub struct ValidatorsFilterDynamic;
+impl<T: Config> frame_support::traits::Filter<ValidatorDataToFilter<T>> for ValidatorsFilterDynamic {
+    fn filter(arg: &ValidatorDataToFilter<T>) -> bool {
+        let min_stake: BalanceOf<T> = Module::<T>::min_stake_dynamic();
+        arg.exposured_stake >= min_stake
+    }
+}
+
 pub trait Config: frame_system::Config + SendTransactionTypes<Call<Self>> {
+	type ValidatorsFilter: frame_support::traits::Filter<ValidatorDataToFilter<Self>>;
 	/// The staking balance.
 	type Currency: LockableCurrency<Self::AccountId, Moment=Self::BlockNumber>;
 
@@ -951,6 +964,10 @@ impl Default for Releases {
 
 decl_storage! {
 	trait Store for Module<T: Config> as Staking {
+		/// Dynamic variable that can be set for each test, this variable is used for dynamic
+        /// validators filter struct.
+        pub MinStakeDynamic get(fn min_stake_dynamic): BalanceOf<T>;
+
 		/// Number of eras to keep in history.
 		///
 		/// Information is kept for eras in `[current_era - history_depth; current_era]`.
@@ -960,7 +977,7 @@ decl_storage! {
 		/// guaranteed.
 		HistoryDepth get(fn history_depth) config(): u32 = 84;
 
-		/// The time span since genesis, incremented at the end of each era. 
+		/// The time span since genesis, incremented at the end of each era.
 		pub TimeSinceGenesis get(fn time_since_genesis): Duration;
 
 		/// The ideal number of staking participants.
@@ -2832,7 +2849,7 @@ impl<T: Config> Module<T> {
 		// This era reward percentage = 90% - (90% - 35%) * `time_since_genesis` / 5_years
 		// Note: active_era_start can be None if end era is called during genesis config.
 		if let Some(active_era_start) = active_era.start {
-			let time_since_genesis = TimeSinceGenesis::get() 
+			let time_since_genesis = TimeSinceGenesis::get()
 				+ Duration::from_millis(T::UnixTime::now().as_millis().saturated_into::<u64>() - active_era_start);
 			if time_since_genesis == Duration::from_secs(14) {
 				panic!();
@@ -2846,7 +2863,7 @@ impl<T: Config> Module<T> {
 
 			// Set ending era reward.
 			<ErasValidatorReward<T>>::insert(&active_era.index, validator_payout);
-			
+
 			let zero: MultiCurrencyBalanceOf<T> = 0u32.into();
 			EraValBurned::<T>::put(zero);
 		}
@@ -2909,6 +2926,15 @@ impl<T: Config> Module<T> {
 			// Populate Stakers and write slot stake.
 			let mut total_stake: BalanceOf<T> = Zero::zero();
 			exposures.into_iter().for_each(|(stash, exposure)| {
+				let vdata_to_filter = ValidatorDataToFilter::<T> {
+                    exposured_stake: exposure.total,
+                };
+                if !<T::ValidatorsFilter as frame_support::traits::Filter<
+                    ValidatorDataToFilter<T>,
+                >>::filter(&vdata_to_filter)
+                {
+                    return ();
+                }
 				total_stake = total_stake.saturating_add(exposure.total);
 				<ErasStakers<T>>::insert(current_era, &stash, &exposure);
 

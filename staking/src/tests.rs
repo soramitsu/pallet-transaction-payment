@@ -1785,6 +1785,7 @@ fn bond_with_little_staked_value_bounded() {
 		.minimum_validator_count(1)
 		.build()
 		.execute_with(|| {
+			MinStakeDynamic::<Test>::set(0u32.into());
 			// setup
 			assert_ok!(Staking::chill(Origin::signed(30)));
 			assert_ok!(Staking::set_payee(Origin::signed(10), RewardDestination::Controller));
@@ -3683,6 +3684,7 @@ mod offchain_election {
 			.has_stakers(false)
 			.build()
 			.execute_with(|| {
+				MinStakeDynamic::<Test>::set(2000u32.into());
 				build_offchain_election_test_ext();
 				run_to_block(12);
 
@@ -4161,7 +4163,7 @@ fn claim_reward_at_the_last_era_and_no_double_claim_and_invalid_claim() {
 
 		// Assume that 1000 val was burned as transaction fees.
 		<Staking as crate::Store>::EraValBurned::put(1000);
-		
+
 		// Compute total payout now for whole duration as other parameter won't change
 		let total_payout_1 = current_total_payout_for_duration(6);
 		assert!(total_payout_1 != total_payout_0);
@@ -4174,7 +4176,7 @@ fn claim_reward_at_the_last_era_and_no_double_claim_and_invalid_claim() {
 
 		// Assume that 1000 val was burned as transaction fees.
 		<Staking as crate::Store>::EraValBurned::put(1000);
-		
+
 		// Compute total payout now for whole duration as other parameter won't change
 		let total_payout_2 = current_total_payout_for_duration(9);
 		assert!(total_payout_2 != total_payout_0);
