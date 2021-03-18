@@ -209,6 +209,12 @@ pub mod pallet {
             let who = ensure_signed(origin)?;
             <Accounts<T>>::mutate(&who, |opt| {
                 let multisig = opt.as_mut().ok_or(Error::<T>::UnknownMultisigAccount)?;
+                // remove the signatory
+                let pos = multisig
+                    .signatories
+                    .binary_search(&signatory)
+                    .map_err(|_| Error::<T>::NotInSignatories)?;
+                multisig.signatories.remove(pos);
                 // remove the signatory's approvals
                 let updated_ops = Multisigs::<T>::iter_prefix(&who)
                     .filter_map(|(k2, mut operation): (_, Multisig<_, _, _>)| {
@@ -223,12 +229,6 @@ pub mod pallet {
                 for (k2, op) in updated_ops {
                     Multisigs::<T>::insert(&who, &k2, op);
                 }
-                // remove the signatory
-                let pos = multisig
-                    .signatories
-                    .binary_search(&signatory)
-                    .map_err(|_| Error::<T>::NotInSignatories)?;
-                multisig.signatories.remove(pos);
                 Ok(().into())
             })
         }
@@ -770,10 +770,6 @@ impl<T: Config> Pallet<T> {
         ensure!(
             signatories.len() <= max_sigs,
             Error::<T>::TooManySignatories
-        );
-        ensure!(
-            signatories.contains(&creator),
-            Error::<T>::SenderNotInSignatories
         );
         ensure!(
             Self::is_sort_and_unique(&signatories),
