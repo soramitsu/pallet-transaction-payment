@@ -42,6 +42,8 @@
 use frame_support::{traits::Get, weights::{Weight, constants::RocksDbWeight}};
 use sp_std::marker::PhantomData;
 
+const EXTRINSIC_FIXED_WEIGHT: Weight = 100_000_000;
+
 /// Weight functions needed for pallet_staking.
 pub trait WeightInfo {
 	fn bond() -> Weight;
@@ -64,6 +66,7 @@ pub trait WeightInfo {
 	fn cancel_deferred_slash(s: u32, ) -> Weight;
 	fn payout_stakers_dead_controller(n: u32, ) -> Weight;
 	fn payout_stakers_alive_staked(n: u32, ) -> Weight;
+	fn payout_stakers() -> Weight;
 	fn rebond(l: u32, ) -> Weight;
 	fn set_history_depth(e: u32, ) -> Weight;
 	fn reap_stash(s: u32, ) -> Weight;
@@ -194,6 +197,9 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().reads((5 as Weight).saturating_mul(n as Weight)))
 			.saturating_add(T::DbWeight::get().writes(3 as Weight))
 			.saturating_add(T::DbWeight::get().writes((3 as Weight).saturating_mul(n as Weight)))
+	}
+	fn payout_stakers() -> Weight {
+		EXTRINSIC_FIXED_WEIGHT
 	}
 	fn rebond(l: u32, ) -> Weight {
 		(40_110_000 as Weight)
@@ -369,6 +375,9 @@ impl WeightInfo for () {
 			.saturating_add(RocksDbWeight::get().reads((5 as Weight).saturating_mul(n as Weight)))
 			.saturating_add(RocksDbWeight::get().writes(3 as Weight))
 			.saturating_add(RocksDbWeight::get().writes((3 as Weight).saturating_mul(n as Weight)))
+	}
+	fn payout_stakers() -> Weight {
+		EXTRINSIC_FIXED_WEIGHT
 	}
 	fn rebond(l: u32, ) -> Weight {
 		(40_110_000 as Weight)
