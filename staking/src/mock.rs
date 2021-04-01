@@ -270,9 +270,8 @@ impl OnUnbalanced<NegativeImbalanceOf<Test>> for RewardRemainderMock {
 }
 
 impl Config for Test {
-	type ValidatorsFilter = ValidatorsFilterDynamic;
 	type Currency = Balances;
-	type MultiCurrency = Tokens;
+	type MultiCurrency = Tokens; 
 	type ValTokenId = ValTokenId;
 	type ValRewardCurve = TestValRewardCurve;
 	type UnixTime = Timestamp;
@@ -511,10 +510,7 @@ impl ExtBuilder {
 	}
 	pub fn build_and_execute(self, test: impl FnOnce() -> ()) {
 		let mut ext = self.build();
-		ext.execute_with(|| {
-            MinStakeDynamic::<Test>::set(50u32.into());
-            test();
-        });
+		ext.execute_with(test);
 		ext.execute_with(post_conditions);
 	}
 }

@@ -50,15 +50,17 @@
 extern crate alloc;
 
 use frame_support::sp_runtime::DispatchError;
-use frame_support::{ensure, Parameter, RuntimeDebug};
 use frame_support::{
-    dispatch::{Decode, Encode, DispatchErrorWithPostInfo, DispatchResultWithPostInfo, PostDispatchInfo},
+    dispatch::{
+        Decode, DispatchErrorWithPostInfo, DispatchResultWithPostInfo, Encode, PostDispatchInfo,
+    },
     traits::{Currency, Get, ReservableCurrency},
     weights::{
         constants::{WEIGHT_PER_MICROS, WEIGHT_PER_NANOS},
         GetDispatchInfo, Pays, Weight,
     },
 };
+use frame_support::{ensure, Parameter, RuntimeDebug};
 use frame_system::{self as system, ensure_signed, RawOrigin};
 use sp_io::hashing::blake2_256;
 use sp_runtime::{
@@ -205,7 +207,10 @@ pub mod pallet {
         /// Total complexity - O(M)
         /// # <weight>
         #[pallet::weight((0, Pays::No))]
-        pub fn remove_signatory(origin: OriginFor<T>, signatory: T::AccountId) -> DispatchResultWithPostInfo {
+        pub fn remove_signatory(
+            origin: OriginFor<T>,
+            signatory: T::AccountId,
+        ) -> DispatchResultWithPostInfo {
             let who = ensure_signed(origin)?;
             <Accounts<T>>::mutate(&who, |opt| {
                 let multisig = opt.as_mut().ok_or(Error::<T>::UnknownMultisigAccount)?;
@@ -245,7 +250,10 @@ pub mod pallet {
         /// Total complexity - O(M)
         /// # <weight>
         #[pallet::weight((0, Pays::No))]
-        pub fn add_signatory(origin: OriginFor<T>, new_member: T::AccountId) -> DispatchResultWithPostInfo {
+        pub fn add_signatory(
+            origin: OriginFor<T>,
+            new_member: T::AccountId,
+        ) -> DispatchResultWithPostInfo {
             let who = ensure_signed(origin)?;
             <Accounts<T>>::mutate(&who, |opt| {
                 let multisig = opt.as_mut().ok_or(Error::<T>::UnknownMultisigAccount)?;
@@ -384,7 +392,7 @@ pub mod pallet {
                 max_weight,
             )
             .map_err(|x| x.error)?;
-			Ok(().into())
+            Ok(().into())
         }
 
         /// Register approval for a dispatch to be made from a deterministic composite account if
@@ -612,14 +620,12 @@ pub mod pallet {
     >;
 
     #[pallet::genesis_config]
-    pub struct GenesisConfig<T: Config>
-    {
+    pub struct GenesisConfig<T: Config> {
         pub accounts: Vec<(T::AccountId, MultisigAccount<T::AccountId>)>,
     }
 
     #[cfg(feature = "std")]
-    impl<T: Config> Default for GenesisConfig<T>
-    {
+    impl<T: Config> Default for GenesisConfig<T> {
         fn default() -> Self {
             Self {
                 accounts: Default::default(),
@@ -628,8 +634,7 @@ pub mod pallet {
     }
 
     #[pallet::genesis_build]
-    impl<T: Config> GenesisBuild<T> for GenesisConfig<T>
-    {
+    impl<T: Config> GenesisBuild<T> for GenesisConfig<T> {
         fn build(&self) {
             {
                 let data = &self.accounts;
@@ -777,9 +782,7 @@ impl<T: Config> Pallet<T> {
         );
         let multisig_config = MultisigAccount::new(signatories, threshold);
         <Accounts<T>>::insert(&multisig_account_id, multisig_config);
-        Self::deposit_event(Event::MultisigAccountCreated(
-            multisig_account_id.clone(),
-        ));
+        Self::deposit_event(Event::MultisigAccountCreated(multisig_account_id.clone()));
         Ok(multisig_account_id)
     }
 
@@ -873,11 +876,7 @@ impl<T: Config> Pallet<T> {
                 let result = call.dispatch(RawOrigin::Signed(id.clone()).into());
                 DispatchedCalls::<T>::insert(&call_hash, timepoint.clone(), ());
                 Self::deposit_event(Event::MultisigExecuted(
-                    who,
-                    timepoint,
-                    id,
-                    call_hash,
-                    result,
+                    who, timepoint, id, call_hash, result,
                 ));
                 Ok(get_result_weight(result)
                     .map(|actual_weight| {
