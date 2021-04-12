@@ -48,6 +48,10 @@
 
 #[macro_use]
 extern crate alloc;
+mod benchmarking;
+#[cfg(test)]
+mod tests;
+pub mod weights;
 
 use frame_support::sp_runtime::DispatchError;
 use frame_support::{
@@ -76,57 +80,12 @@ type BalanceOf<T> =
 /// Just a bunch of bytes, but they should decode to a valid `Call`.
 pub type OpaqueCall = Vec<u8>;
 
-pub trait WeightInfo {
-    fn as_multi_threshold_1(z: u32) -> Weight;
-    fn as_multi_create(s: u32, z: u32) -> Weight;
-    fn as_multi_create_store(s: u32, z: u32) -> Weight;
-    fn as_multi_approve(s: u32, z: u32) -> Weight;
-    fn as_multi_complete(s: u32, z: u32) -> Weight;
-    fn approve_as_multi_create(s: u32, z: u32) -> Weight;
-    fn approve_as_multi_approve(s: u32, z: u32) -> Weight;
-    fn approve_as_multi_complete(s: u32, z: u32) -> Weight;
-    fn cancel_as_multi(s: u32, z: u32) -> Weight;
-    fn cancel_as_multi_store(s: u32, z: u32) -> Weight;
-}
-
-impl WeightInfo for () {
-    fn as_multi_threshold_1(_z: u32) -> Weight {
-        1_000_000_000
-    }
-    fn as_multi_create(_s: u32, _z: u32) -> Weight {
-        1_000_000_000
-    }
-    fn as_multi_create_store(_s: u32, _z: u32) -> Weight {
-        1_000_000_000
-    }
-    fn as_multi_approve(_s: u32, _z: u32) -> Weight {
-        1_000_000_000
-    }
-    fn as_multi_complete(_s: u32, _z: u32) -> Weight {
-        1_000_000_000
-    }
-    fn approve_as_multi_create(_s: u32, _z: u32) -> Weight {
-        1_000_000_000
-    }
-    fn approve_as_multi_approve(_s: u32, _z: u32) -> Weight {
-        1_000_000_000
-    }
-    fn approve_as_multi_complete(_s: u32, _z: u32) -> Weight {
-        1_000_000_000
-    }
-    fn cancel_as_multi(_s: u32, _z: u32) -> Weight {
-        1_000_000_000
-    }
-    fn cancel_as_multi_store(_s: u32, _z: u32) -> Weight {
-        1_000_000_000
-    }
-}
-
 pub use pallet::*;
 
 #[frame_support::pallet]
 pub mod pallet {
     use super::*;
+    use crate::weights::WeightInfo;
     use frame_support::{dispatch::DispatchResultWithPostInfo, pallet_prelude::*};
     use frame_system::pallet_prelude::*;
 
@@ -285,7 +244,7 @@ pub mod pallet {
         /// - Plus Call Weight
         /// # </weight>
         #[pallet::weight((0, Pays::No))]
-        fn as_multi_threshold_1(
+        pub(super) fn as_multi_threshold_1(
             origin: OriginFor<T>,
             id: T::AccountId,
             call: Box<<T as Config>::Call>,
@@ -374,8 +333,18 @@ pub mod pallet {
         ///     - Writes: Multisig Storage, [Caller Account], Calls (if `store_call`)
         /// - Plus Call Weight
         /// # </weight>
-        #[pallet::weight((0, Pays::No))]
-        fn as_multi(
+        #[pallet::weight({
+            let s = Accounts::<T>::get(&id).map(|x| x.signatories.len() as u32).unwrap_or(0);
+            let z = call.len() as u32;
+
+            let w = T::WeightInfo::as_multi_create(s, z)
+            .max(T::WeightInfo::as_multi_create_store(s, z))
+            .max(T::WeightInfo::as_multi_approve(s, z))
+            .max(T::WeightInfo::as_multi_complete(s, z))
+            .saturating_add(* max_weight);
+            (w, Pays::No)
+        })]
+        pub(super) fn as_multi(
             origin: OriginFor<T>,
             id: T::AccountId,
             maybe_timepoint: Option<Timepoint<T::BlockNumber>>,
@@ -391,8 +360,6 @@ pub mod pallet {
                 CallOrHash::Call(call, store_call),
                 max_weight,
             )
-            .map_err(|x| x.error)?;
-            Ok(().into())
         }
 
         /// Register approval for a dispatch to be made from a deterministic composite account if
@@ -435,7 +402,7 @@ pub mod pallet {
         ///     - Write: Multisig Storage, [Caller Account]
         /// # </weight>
         #[pallet::weight((0, Pays::No))]
-        fn approve_as_multi(
+        pub(super) fn approve_as_multi(
             origin: OriginFor<T>,
             id: T::AccountId,
             maybe_timepoint: Option<Timepoint<T::BlockNumber>>,
@@ -480,7 +447,7 @@ pub mod pallet {
         ///     - Write: Multisig Storage, [Caller Account], Refund Account, Calls
         /// # </weight>
         #[pallet::weight((0, Pays::No))]
-        fn cancel_as_multi(
+        pub(super) fn cancel_as_multi(
             origin: OriginFor<T>,
             id: T::AccountId,
             timepoint: Timepoint<T::BlockNumber>,
@@ -504,11 +471,6 @@ pub mod pallet {
     }
 
     /// Events type.
-    // pub enum Event<T> where
-    // 	AccountId = <T as system::Config>::AccountId,
-    // 	BlockNumber = <T as system::Config>::BlockNumber,
-    // 	CallHash = [u8; 32]
-    // {
     #[pallet::event]
     #[pallet::generate_deposit(pub(super) fn deposit_event)]
     #[pallet::metadata(T::AccountId = "AccountId", T::BlockNumber = "Balance")]
@@ -782,6 +744,7 @@ impl<T: Config> Pallet<T> {
         );
         let multisig_config = MultisigAccount::new(signatories, threshold);
         <Accounts<T>>::insert(&multisig_account_id, multisig_config);
+        frame_system::Pallet::<T>::inc_providers(&multisig_account_id);
         Self::deposit_event(Event::MultisigAccountCreated(multisig_account_id.clone()));
         Ok(multisig_account_id)
     }
@@ -878,8 +841,8 @@ impl<T: Config> Pallet<T> {
                 Self::deposit_event(Event::MultisigExecuted(
                     who, timepoint, id, call_hash, result,
                 ));
-                Ok(get_result_weight(result)
-                    .map(|actual_weight| {
+                Ok((
+                    get_result_weight(result).map(|actual_weight| {
                         weight_of::as_multi::<T>(
                             signatories_len,
                             call_len,
@@ -887,7 +850,9 @@ impl<T: Config> Pallet<T> {
                             true, // Call is removed
                             true, // User is refunded
                         )
-                    })
+                    }),
+                    Pays::No,
+                )
                     .into())
             } else {
                 // We cannot dispatch the call now; either it isn't available, or it is, but we
@@ -923,14 +888,17 @@ impl<T: Config> Pallet<T> {
                 }
 
                 // Call is not made, so the actual weight does not include call
-                Ok(Some(weight_of::as_multi::<T>(
-                    signatories_len,
-                    call_len,
-                    0,
-                    stored, // Call stored?
-                    false,  // No refund
-                ))
-                .into())
+                Ok((
+                    Some(weight_of::as_multi::<T>(
+                        signatories_len,
+                        call_len,
+                        0,
+                        stored, // Call stored?
+                        false,  // No refund
+                    )),
+                    Pays::No,
+                )
+                    .into())
             }
         } else {
             // Just start the operation by recording it in storage.
@@ -962,14 +930,17 @@ impl<T: Config> Pallet<T> {
             );
             Self::deposit_event(Event::NewMultisig(who, id, call_hash));
             // Call is not made, so we can return that weight
-            return Ok(Some(weight_of::as_multi::<T>(
-                signatories_len,
-                call_len,
-                0,
-                stored, // Call stored?
-                false,  // No refund
-            ))
-            .into());
+            return Ok((
+                Some(weight_of::as_multi::<T>(
+                    signatories_len,
+                    call_len,
+                    0,
+                    stored, // Call stored?
+                    false,  // No refund
+                )),
+                Pays::No,
+            )
+                .into());
         }
     }
 

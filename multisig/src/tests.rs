@@ -23,8 +23,8 @@ use super::*;
 
 use crate as multisig;
 use frame_support::{
-    assert_err, assert_noop, assert_ok, dispatch::DispatchError, impl_outer_dispatch,
-    impl_outer_event, impl_outer_origin, parameter_types, traits::Filter, weights::Weight,
+    assert_err, assert_noop, assert_ok, dispatch::DispatchError,
+    parameter_types, construct_runtime, traits::Filter, weights::Weight,
 };
 use sp_core::H256;
 use sp_runtime::{
@@ -33,38 +33,22 @@ use sp_runtime::{
     Perbill,
 };
 
-impl_outer_origin! {
-    pub enum Origin for Test where system = frame_system {}
-}
-
-impl_outer_event! {
-    pub enum TestEvent for Test {
-        system<T>,
-        pallet_balances<T>,
-        multisig<T>,
-    }
-}
-impl_outer_dispatch! {
-    pub enum Call for Test where origin: Origin {
-        frame_system::System,
-        pallet_balances::Balances,
-        multisig::Multisig,
-    }
-}
-
 // For testing the pallet, we construct most of a mock runtime. This means
 // first constructing a configuration type (`Test`) which `impl`s each of the
 // configuration traits of pallets we want to use.
-#[derive(Clone, Eq, PartialEq)]
-pub struct Test;
 parameter_types! {
     pub const BlockHashCount: u64 = 250;
     pub const MaximumBlockWeight: Weight = 1024;
     pub const MaximumBlockLength: u32 = 2 * 1024;
     pub const AvailableBlockRatio: Perbill = Perbill::one();
 }
+type UncheckedExtrinsic = frame_system::mocking::MockUncheckedExtrinsic<Test>;
+type Block = frame_system::mocking::MockBlock<Test>;
+
 impl frame_system::Config for Test {
     type BaseCallFilter = TestBaseCallFilter;
+    type BlockWeights = ();
+    type BlockLength = ();
     type Origin = Origin;
     type Call = Call;
     type Index = u64;
@@ -74,28 +58,23 @@ impl frame_system::Config for Test {
     type AccountId = u64;
     type Lookup = IdentityLookup<Self::AccountId>;
     type Header = Header;
-    type Event = TestEvent;
+    type Event = Event;
     type BlockHashCount = BlockHashCount;
-    type MaximumBlockWeight = MaximumBlockWeight;
     type DbWeight = ();
-    type BlockExecutionWeight = ();
-    type ExtrinsicBaseWeight = ();
-    type MaximumExtrinsicWeight = MaximumBlockWeight;
-    type MaximumBlockLength = MaximumBlockLength;
-    type AvailableBlockRatio = AvailableBlockRatio;
     type Version = ();
-    type PalletInfo = ();
+    type PalletInfo = PalletInfo;
     type AccountData = pallet_balances::AccountData<u64>;
     type OnNewAccount = ();
     type OnKilledAccount = ();
     type SystemWeightInfo = ();
+    type SS58Prefix = ();
 }
 parameter_types! {
     pub const ExistentialDeposit: u64 = 1;
 }
 impl pallet_balances::Config for Test {
     type Balance = u64;
-    type Event = TestEvent;
+    type Event = Event;
     type DustRemoval = ();
     type ExistentialDeposit = ExistentialDeposit;
     type AccountStore = System;
@@ -120,7 +99,7 @@ impl Filter<Call> for TestBaseCallFilter {
     }
 }
 impl Config for Test {
-    type Event = TestEvent;
+    type Event = Event;
     type Call = Call;
     type Currency = Balances;
     type DepositBase = DepositBase;
@@ -128,9 +107,18 @@ impl Config for Test {
     type MaxSignatories = MaxSignatories;
     type WeightInfo = ();
 }
-type System = frame_system::Module<Test>;
-type Balances = pallet_balances::Module<Test>;
-type Multisig = Pallet<Test>;
+
+construct_runtime!(
+    pub enum Test where
+        Block = Block,
+        NodeBlock = Block,
+        UncheckedExtrinsic = UncheckedExtrinsic
+    {
+        System: frame_system::{Module, Call, Config, Storage, Event<T>},
+        Balances: pallet_balances::{Module, Call, Storage, Config<T>, Event<T>},
+        Multisig: multisig::{Module, Call, Storage, Config<T>, Event<T>},
+    }
+);
 
 use crate::Call as MultisigCall;
 use pallet_balances::Call as BalancesCall;
@@ -150,7 +138,7 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
 }
 
 #[allow(unused)]
-fn last_event() -> TestEvent {
+fn last_event() -> Event {
     system::Module::<Test>::events()
         .pop()
         .map(|e| e.event)
@@ -158,7 +146,7 @@ fn last_event() -> TestEvent {
 }
 
 #[allow(unused)]
-fn expect_event<E: Into<TestEvent>>(e: E) {
+fn expect_event<E: Into<Event>>(e: E) {
     assert_eq!(last_event(), e.into());
 }
 
