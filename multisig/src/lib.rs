@@ -617,6 +617,20 @@ pub mod pallet {
     }
 }
 
+/// Represents height on either Thischain of Sidechain.
+#[derive(Copy, Clone, Eq, PartialEq, Encode, Decode, RuntimeDebug)]
+#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
+pub enum MultiChainHeight<BlockNumber> {
+    Thischain(BlockNumber),
+    Sidechain(u64),
+}
+
+impl<BlockNumber: Default> Default for MultiChainHeight<BlockNumber> {
+    fn default() -> Self {
+        MultiChainHeight::Thischain(BlockNumber::default())
+    }
+}
+
 /// A global extrinsic index, formed as the extrinsic index within a block, together with that
 /// block's height. This allows a transaction in which a multisig operation of a particular
 /// composite was created to be uniquely identified.
@@ -624,7 +638,7 @@ pub mod pallet {
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
 pub struct Timepoint<BlockNumber> {
     /// The height of the chain at the point in time.
-    height: BlockNumber,
+    height: MultiChainHeight<BlockNumber>,
     /// The index of the extrinsic at the point in time.
     index: u32,
 }
@@ -912,7 +926,7 @@ impl<T: Config> Pallet<T> {
                 false
             };
 
-            let timepoint = maybe_timepoint.unwrap_or_else(|| Self::timepoint());
+            let timepoint = maybe_timepoint.unwrap_or_else(|| Self::thischain_timepoint());
             ensure!(
                 !DispatchedCalls::<T>::contains_key(&call_hash, timepoint),
                 Error::<T>::AlreadyDispatched
@@ -976,11 +990,19 @@ impl<T: Config> Pallet<T> {
         let _ = Calls::<T>::take(hash);
     }
 
-    /// The current `Timepoint`.
-    pub fn timepoint() -> Timepoint<T::BlockNumber> {
+    /// The current `Timepoint` at Thischain.
+    pub fn thischain_timepoint() -> Timepoint<T::BlockNumber> {
         Timepoint {
-            height: <system::Pallet<T>>::block_number(),
+            height: MultiChainHeight::Thischain(<system::Pallet<T>>::block_number()),
             index: <system::Pallet<T>>::extrinsic_index().unwrap_or_default(),
+        }
+    }
+
+    /// Construct `Timepoint` at Sidehcain.
+    pub fn sidechain_timepoint(height: u64, index: u32) -> Timepoint<T::BlockNumber> {
+        Timepoint {
+            height: MultiChainHeight::Sidechain(height),
+            index,
         }
     }
 }

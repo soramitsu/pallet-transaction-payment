@@ -23,8 +23,8 @@ use super::*;
 
 use crate as multisig;
 use frame_support::{
-    assert_err, assert_noop, assert_ok, dispatch::DispatchError,
-    parameter_types, construct_runtime, traits::Filter, weights::Weight,
+    assert_err, assert_noop, assert_ok, construct_runtime, dispatch::DispatchError,
+    parameter_types, traits::Filter, weights::Weight,
 };
 use sp_core::H256;
 use sp_runtime::{
@@ -151,7 +151,7 @@ fn expect_event<E: Into<Event>>(e: E) {
 }
 
 fn now() -> Timepoint<u64> {
-    Multisig::timepoint()
+    Multisig::thischain_timepoint()
 }
 
 #[test]
