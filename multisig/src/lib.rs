@@ -340,8 +340,7 @@ pub mod pallet {
             let w = T::WeightInfo::as_multi_create(s, z)
             .max(T::WeightInfo::as_multi_create_store(s, z))
             .max(T::WeightInfo::as_multi_approve(s, z))
-            .max(T::WeightInfo::as_multi_complete(s, z))
-            .saturating_add(* max_weight);
+            .max(T::WeightInfo::as_multi_complete(s, z));
             (w, Pays::No)
         })]
         pub(super) fn as_multi(
