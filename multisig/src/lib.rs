@@ -69,7 +69,7 @@ use frame_system::{self as system, ensure_signed, RawOrigin};
 use sp_io::hashing::blake2_256;
 use sp_runtime::{
     traits::{Dispatchable, Zero},
-    FixedPointNumber, FixedU128, Percent,
+    Percent,
 };
 #[cfg(feature = "std")]
 use sp_runtime::{Deserialize, Serialize};
@@ -88,6 +88,7 @@ pub mod pallet {
     use crate::weights::WeightInfo;
     use frame_support::{dispatch::DispatchResultWithPostInfo, pallet_prelude::*};
     use frame_system::pallet_prelude::*;
+    use sp_std::fmt::Debug;
 
     #[pallet::pallet]
     #[pallet::generate_store(pub(super) trait Store)]
@@ -103,7 +104,8 @@ pub mod pallet {
         type Call: Parameter
             + Dispatchable<Origin = Self::Origin, PostInfo = PostDispatchInfo>
             + GetDispatchInfo
-            + From<frame_system::Call<Self>>;
+            + From<frame_system::Call<Self>>
+            + Debug;
 
         /// The currency mechanism.
         type Currency: ReservableCurrency<Self::AccountId>;
@@ -148,10 +150,9 @@ pub mod pallet {
         pub fn register_multisig(
             origin: OriginFor<T>,
             signatories: Vec<T::AccountId>,
-            threshold: Percent,
         ) -> DispatchResultWithPostInfo {
             let who = ensure_signed(origin)?;
-            Self::register_multisig_inner(who, signatories, threshold)?;
+            Self::register_multisig_inner(who, signatories)?;
             Ok(().into())
         }
 
@@ -248,6 +249,7 @@ pub mod pallet {
             origin: OriginFor<T>,
             id: T::AccountId,
             call: Box<<T as Config>::Call>,
+            timepoint: Timepoint<T::BlockNumber>,
         ) -> DispatchResultWithPostInfo {
             let who = ensure_signed(origin)?;
             let multisig: MultisigAccount<T::AccountId> = Self::accounts(&id).unwrap();
@@ -258,9 +260,13 @@ pub mod pallet {
             let signatories = multisig.signatories;
             ensure!(signatories.contains(&who), Error::<T>::NotInSignatories);
 
-            let call_len = call.using_encoded(|c| c.len());
+            let (call_len, call_hash) = call.using_encoded(|c| (c.len(), blake2_256(c)));
+            ensure!(
+                !DispatchedCalls::<T>::contains_key(&call_hash, timepoint.clone()),
+                Error::<T>::AlreadyDispatched
+            );
+            DispatchedCalls::<T>::insert(&call_hash, timepoint, ());
             let result = call.dispatch(RawOrigin::Signed(id).into());
-
             result
                 .map(|post_dispatch_info| {
                     post_dispatch_info
@@ -456,6 +462,10 @@ pub mod pallet {
             let multisig = Self::accounts(&id).ok_or(Error::<T>::UnknownMultisigAccount)?;
             let threshold = multisig.threshold_num();
             ensure!(threshold > 1, Error::<T>::MinimumThreshold);
+            ensure!(
+                !DispatchedCalls::<T>::contains_key(&call_hash, timepoint),
+                Error::<T>::AlreadyDispatched
+            );
 
             let m = <Multisigs<T>>::get(&id, call_hash).ok_or(Error::<T>::NotFound)?;
             ensure!(m.when == timepoint, Error::<T>::WrongTimepoint);
@@ -662,15 +672,17 @@ pub struct MultisigAccount<AccountId> {
     signatories: Vec<AccountId>,
     /// Threshold represented in percents. Once reached,
     /// the proposal will be executed.
+    ///
+    /// NOTE: currently unused.
     threshold: Percent,
 }
 
 impl<AccountId: Ord> MultisigAccount<AccountId> {
-    pub fn new(mut signatories: Vec<AccountId>, threshold: Percent) -> Self {
+    pub fn new(mut signatories: Vec<AccountId>) -> Self {
         signatories.sort();
         MultisigAccount {
             signatories,
-            threshold,
+            threshold: Default::default(),
         }
     }
 }
@@ -682,8 +694,8 @@ impl<AccountId: PartialEq + Ord + Encode> MultisigAccount<AccountId> {
 
     /// Number of signatories needed for a proposal execution.
     pub fn threshold_num(&self) -> u16 {
-        (FixedU128::from(self.signatories.len() as u128) * FixedU128::from(self.threshold))
-            .saturating_mul_int(1)
+        let signatories_count = self.signatories.len() as u16;
+        signatories_count - (signatories_count - 1) / 3
     }
 }
 
@@ -736,7 +748,6 @@ impl<T: Config> Pallet<T> {
     pub fn register_multisig_inner(
         creator: T::AccountId,
         signatories: Vec<T::AccountId>,
-        threshold: Percent,
     ) -> Result<T::AccountId, DispatchError> {
         let block_num = <system::Pallet<T>>::block_number();
         let nonce = <system::Pallet<T>>::account_nonce(&creator);
@@ -745,7 +756,6 @@ impl<T: Config> Pallet<T> {
             Self::accounts(&multisig_account_id).is_none(),
             Error::<T>::MultisigAlreadyExists
         );
-        ensure!(!threshold.is_zero(), Error::<T>::ZeroThreshold);
         let max_sigs = T::MaxSignatories::get() as usize;
         ensure!(
             signatories.len() <= max_sigs,
@@ -755,7 +765,7 @@ impl<T: Config> Pallet<T> {
             Self::is_sort_and_unique(&signatories),
             Error::<T>::SignatoriesAreNotUniqueOrUnordered
         );
-        let multisig_config = MultisigAccount::new(signatories, threshold);
+        let multisig_config = MultisigAccount::new(signatories);
         <Accounts<T>>::insert(&multisig_account_id, multisig_config);
         frame_system::Pallet::<T>::inc_providers(&multisig_account_id);
         Self::deposit_event(Event::MultisigAccountCreated(multisig_account_id.clone()));
