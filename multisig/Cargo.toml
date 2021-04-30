@@ -22,7 +22,7 @@ sp-std = { version = "3", default-features = false }
 sp-io = { version = "3", default-features = false }
 
 frame-benchmarking = { version = "3", default-features = false, optional = true }
-rustc-hex = "2.1.0"
+rustc-hex = { version = "2.1.0", default-features = false }
 
 [dev-dependencies]
 sp-core = { version = "3" }

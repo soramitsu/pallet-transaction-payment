@@ -252,6 +252,7 @@ pub mod pallet {
             call: Box<<T as Config>::Call>,
             // timepoint:
         ) -> DispatchResultWithPostInfo {
+            use alloc::string::String;
             use rustc_hex::ToHex;
             let who = ensure_signed(origin)?;
             let multisig: MultisigAccount<T::AccountId> = Self::accounts(&id).unwrap();
