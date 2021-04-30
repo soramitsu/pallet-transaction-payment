@@ -1113,7 +1113,7 @@ fn multisig_filters() {
         ));
 
         let call = Box::new(Call::System(frame_system::Call::set_code(vec![])));
-        assert_noop!(
+        assert_err!(
             Multisig::as_multi_threshold_1(Origin::signed(1), multi, call.clone()),
             DispatchError::BadOrigin,
         );

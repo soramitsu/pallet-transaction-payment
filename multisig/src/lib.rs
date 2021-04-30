@@ -88,6 +88,7 @@ pub mod pallet {
     use crate::weights::WeightInfo;
     use frame_support::{dispatch::DispatchResultWithPostInfo, pallet_prelude::*};
     use frame_system::pallet_prelude::*;
+    use sp_std::fmt::Debug;
 
     #[pallet::pallet]
     #[pallet::generate_store(pub(super) trait Store)]
@@ -103,7 +104,8 @@ pub mod pallet {
         type Call: Parameter
             + Dispatchable<Origin = Self::Origin, PostInfo = PostDispatchInfo>
             + GetDispatchInfo
-            + From<frame_system::Call<Self>>;
+            + From<frame_system::Call<Self>>
+            + Debug;
 
         /// The currency mechanism.
         type Currency: ReservableCurrency<Self::AccountId>;
@@ -248,7 +250,9 @@ pub mod pallet {
             origin: OriginFor<T>,
             id: T::AccountId,
             call: Box<<T as Config>::Call>,
+            // timepoint:
         ) -> DispatchResultWithPostInfo {
+            use rustc_hex::ToHex;
             let who = ensure_signed(origin)?;
             let multisig: MultisigAccount<T::AccountId> = Self::accounts(&id).unwrap();
             ensure!(
@@ -258,7 +262,12 @@ pub mod pallet {
             let signatories = multisig.signatories;
             ensure!(signatories.contains(&who), Error::<T>::NotInSignatories);
 
-            let call_len = call.using_encoded(|c| c.len());
+            let (call_len, call_hash) = call.using_encoded(|c| (c.len(), blake2_256(c)));
+            if DispatchedCalls::<T>::contains_key(&call_hash, Timepoint::default()) {
+                let s = call.encode().to_hex::<String>();
+                debug::error!("DOUBLE-AS-MULTI: {:?} {}\n{:?}", call_hash, s, call);
+            }
+            DispatchedCalls::<T>::insert(&call_hash, Timepoint::default(), ());
             let result = call.dispatch(RawOrigin::Signed(id).into());
 
             result
