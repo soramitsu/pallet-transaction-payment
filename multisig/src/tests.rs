@@ -161,7 +161,6 @@ fn multisig_deposit_is_taken_and_returned() {
         assert_ok!(Multisig::register_multisig(
             Origin::signed(1),
             vec![1, 2, 3],
-            Percent::from_parts(67)
         ));
         assert_ok!(Balances::transfer(Origin::signed(1), multi, 5));
         assert_ok!(Balances::transfer(Origin::signed(2), multi, 5));
@@ -201,7 +200,6 @@ fn multisig_deposit_is_taken_and_returned_with_call_storage() {
         assert_ok!(Multisig::register_multisig(
             Origin::signed(1),
             vec![1, 2, 3],
-            Percent::from_parts(67)
         ));
         assert_ok!(Balances::transfer(Origin::signed(1), multi, 5));
         assert_ok!(Balances::transfer(Origin::signed(2), multi, 5));
@@ -241,7 +239,6 @@ fn multisig_deposit_is_taken_and_returned_with_alt_call_storage() {
         assert_ok!(Multisig::register_multisig(
             Origin::signed(1),
             vec![1, 2, 3],
-            Percent::from_parts(100)
         ));
         assert_ok!(Balances::transfer(Origin::signed(1), multi, 5));
         assert_ok!(Balances::transfer(Origin::signed(2), multi, 5));
@@ -296,7 +293,6 @@ fn cancel_multisig_returns_deposit() {
         assert_ok!(Multisig::register_multisig(
             Origin::signed(1),
             vec![1, 2, 3],
-            Percent::from_parts(100)
         ));
 
         let call = Call::Balances(BalancesCall::transfer(6, 15)).encode();
@@ -334,8 +330,7 @@ fn already_dispatched_checking_works() {
         let multi = Multisig::multi_account_id(&1, 1, 0);
         assert_ok!(Multisig::register_multisig(
             Origin::signed(1),
-            vec![1, 2, 3],
-            Percent::from_parts(67)
+            vec![1, 2, 3, 4],
         ));
         let call = Call::Balances(BalancesCall::transfer(6, 15));
         let call_weight = call.get_dispatch_info().weight;
@@ -343,7 +338,7 @@ fn already_dispatched_checking_works() {
         assert_ok!(Multisig::as_multi(
             Origin::signed(1),
             multi,
-            None,
+            Some(now()),
             call_encoded.clone(),
             false,
             call_weight
@@ -356,15 +351,45 @@ fn already_dispatched_checking_works() {
             false,
             call_weight
         ));
+        assert_ok!(Multisig::as_multi(
+            Origin::signed(3),
+            multi,
+            Some(now()),
+            call_encoded.clone(),
+            false,
+            call_weight
+        ));
         assert_noop!(
             Multisig::as_multi(
-                Origin::signed(1),
+                Origin::signed(4),
                 multi,
-                None,
+                Some(now()),
                 call_encoded.clone(),
                 false,
                 call_weight
             ),
+            Error::<Test>::AlreadyDispatched,
+        );
+    });
+}
+
+#[test]
+fn already_dispatched_checking_works_for_threshold_1() {
+    new_test_ext().execute_with(|| {
+        let multi = Multisig::multi_account_id(&1, 1, 0);
+        assert_ok!(Multisig::register_multisig(Origin::signed(1), vec![1],));
+        assert_ok!(Balances::transfer(Origin::signed(1), multi, 5));
+
+        let boxed_call = Box::new(Call::Balances(BalancesCall::transfer(6, 5)));
+        let timepoint = now();
+        assert_ok!(Multisig::as_multi_threshold_1(
+            Origin::signed(1),
+            multi,
+            boxed_call.clone(),
+            timepoint.clone()
+        ));
+        assert_noop!(
+            Multisig::as_multi_threshold_1(Origin::signed(1), multi, boxed_call, timepoint.clone()),
             Error::<Test>::AlreadyDispatched,
         );
     });
@@ -377,7 +402,6 @@ fn timepoint_checking_works() {
         assert_ok!(Multisig::register_multisig(
             Origin::signed(1),
             vec![1, 2, 3],
-            Percent::from_parts(67)
         ));
         assert_ok!(Balances::transfer(Origin::signed(1), multi, 5));
         assert_ok!(Balances::transfer(Origin::signed(2), multi, 5));
@@ -425,14 +449,10 @@ fn timepoint_checking_works() {
 }
 
 #[test]
-fn multisig_2_of_3_works_with_call_storing() {
+fn multisig_2_of_2_works_with_call_storing() {
     new_test_ext().execute_with(|| {
         let multi = Multisig::multi_account_id(&1, 1, 0);
-        assert_ok!(Multisig::register_multisig(
-            Origin::signed(1),
-            vec![1, 2, 3],
-            Percent::from_parts(67)
-        ));
+        assert_ok!(Multisig::register_multisig(Origin::signed(1), vec![1, 2],));
         assert_ok!(Balances::transfer(Origin::signed(1), multi, 5));
         assert_ok!(Balances::transfer(Origin::signed(2), multi, 5));
         assert_ok!(Balances::transfer(Origin::signed(3), multi, 5));
@@ -463,14 +483,10 @@ fn multisig_2_of_3_works_with_call_storing() {
 }
 
 #[test]
-fn multisig_2_of_3_works() {
+fn multisig_2_of_2_works() {
     new_test_ext().execute_with(|| {
         let multi = Multisig::multi_account_id(&1, 1, 0);
-        assert_ok!(Multisig::register_multisig(
-            Origin::signed(1),
-            vec![1, 2, 3],
-            Percent::from_parts(67)
-        ));
+        assert_ok!(Multisig::register_multisig(Origin::signed(1), vec![1, 2],));
         assert_ok!(Balances::transfer(Origin::signed(1), multi, 5));
         assert_ok!(Balances::transfer(Origin::signed(2), multi, 5));
         assert_ok!(Balances::transfer(Origin::signed(3), multi, 5));
@@ -507,7 +523,6 @@ fn multisig_3_of_3_works() {
         assert_ok!(Multisig::register_multisig(
             Origin::signed(1),
             vec![1, 2, 3],
-            Percent::from_parts(100)
         ));
         assert_ok!(Balances::transfer(Origin::signed(1), multi, 5));
         assert_ok!(Balances::transfer(Origin::signed(2), multi, 5));
@@ -552,7 +567,6 @@ fn multisig_only_multisig_can_add_or_remove_signatory() {
         assert_ok!(Multisig::register_multisig(
             Origin::signed(1),
             vec![1, 2, 3],
-            Percent::from_parts(67)
         ));
 
         assert_ok!(Multisig::add_signatory(Origin::signed(multi), 4));
@@ -575,7 +589,6 @@ fn multisig_signatory_approve_removes_with_the_signatory() {
         assert_ok!(Multisig::register_multisig(
             Origin::signed(1),
             vec![1, 2, 3, 4],
-            Percent::from_parts(67)
         ));
 
         let call = Call::Multisig(MultisigCall::add_signatory(5));
@@ -600,13 +613,12 @@ fn multisig_signatory_approve_removes_with_the_signatory() {
 }
 
 #[test]
-fn multisig_2_of_3_works_with_new_signatory() {
+fn multisig_3_of_3_works_with_new_signatory() {
     new_test_ext().execute_with(|| {
         let multi = Multisig::multi_account_id(&1, 1, 0);
         assert_ok!(Multisig::register_multisig(
             Origin::signed(1),
             vec![1, 2, 3],
-            Percent::from_parts(67)
         ));
 
         let call = Call::Multisig(MultisigCall::add_signatory(4));
@@ -673,13 +685,12 @@ fn multisig_2_of_3_works_with_new_signatory() {
 }
 
 #[test]
-fn multisig_2_of_3_works_after_removing_signatory() {
+fn multisig_3_of_4_works_after_removing_signatory() {
     new_test_ext().execute_with(|| {
         let multi = Multisig::multi_account_id(&1, 1, 0);
         assert_ok!(Multisig::register_multisig(
             Origin::signed(1),
             vec![1, 2, 3, 4],
-            Percent::from_parts(67)
         ));
 
         let call = Call::Multisig(MultisigCall::add_signatory(4));
@@ -752,7 +763,6 @@ fn cancel_multisig_works() {
         assert_ok!(Multisig::register_multisig(
             Origin::signed(1),
             vec![1, 2, 3],
-            Percent::from_parts(100)
         ));
 
         let call = Call::Balances(BalancesCall::transfer(6, 15)).encode();
@@ -791,7 +801,6 @@ fn cancel_multisig_with_call_storage_works() {
         assert_ok!(Multisig::register_multisig(
             Origin::signed(1),
             vec![1, 2, 3],
-            Percent::from_parts(100)
         ));
 
         let call = Call::Balances(BalancesCall::transfer(6, 15)).encode();
@@ -833,7 +842,6 @@ fn cancel_multisig_with_alt_call_storage_works() {
         assert_ok!(Multisig::register_multisig(
             Origin::signed(1),
             vec![1, 2, 3],
-            Percent::from_parts(100)
         ));
 
         let call = Call::Balances(BalancesCall::transfer(6, 15)).encode();
@@ -867,14 +875,10 @@ fn cancel_multisig_with_alt_call_storage_works() {
 }
 
 #[test]
-fn multisig_2_of_3_as_multi_works() {
+fn multisig_2_of_2_as_multi_works() {
     new_test_ext().execute_with(|| {
         let multi = Multisig::multi_account_id(&1, 1, 0);
-        assert_ok!(Multisig::register_multisig(
-            Origin::signed(1),
-            vec![1, 2, 3],
-            Percent::from_parts(67)
-        ));
+        assert_ok!(Multisig::register_multisig(Origin::signed(1), vec![1, 2],));
 
         assert_ok!(Balances::transfer(Origin::signed(1), multi, 5));
         assert_ok!(Balances::transfer(Origin::signed(2), multi, 5));
@@ -906,14 +910,10 @@ fn multisig_2_of_3_as_multi_works() {
 }
 
 #[test]
-fn multisig_2_of_3_as_multi_with_many_calls_works() {
+fn multisig_2_of_2_as_multi_with_many_calls_works() {
     new_test_ext().execute_with(|| {
         let multi = Multisig::multi_account_id(&1, 1, 0);
-        assert_ok!(Multisig::register_multisig(
-            Origin::signed(1),
-            vec![1, 2, 3],
-            Percent::from_parts(67)
-        ));
+        assert_ok!(Multisig::register_multisig(Origin::signed(1), vec![1, 2],));
 
         assert_ok!(Balances::transfer(Origin::signed(1), multi, 5));
         assert_ok!(Balances::transfer(Origin::signed(2), multi, 5));
@@ -943,7 +943,7 @@ fn multisig_2_of_3_as_multi_with_many_calls_works() {
             0
         ));
         assert_ok!(Multisig::as_multi(
-            Origin::signed(3),
+            Origin::signed(2),
             multi,
             Some(now()),
             data1,
@@ -951,7 +951,7 @@ fn multisig_2_of_3_as_multi_with_many_calls_works() {
             call1_weight
         ));
         assert_ok!(Multisig::as_multi(
-            Origin::signed(3),
+            Origin::signed(1),
             multi,
             Some(now()),
             data2,
@@ -965,13 +965,12 @@ fn multisig_2_of_3_as_multi_with_many_calls_works() {
 }
 
 #[test]
-fn multisig_2_of_3_cannot_reissue_same_call() {
+fn multisig_3_of_4_cannot_reissue_same_call() {
     new_test_ext().execute_with(|| {
         let multi = Multisig::multi_account_id(&1, 1, 0);
         assert_ok!(Multisig::register_multisig(
             Origin::signed(1),
-            vec![1, 2, 3],
-            Percent::from_parts(67)
+            vec![1, 2, 3, 4],
         ));
 
         assert_ok!(Balances::transfer(Origin::signed(1), multi, 5));
@@ -997,21 +996,19 @@ fn multisig_2_of_3_cannot_reissue_same_call() {
             false,
             call_weight
         ));
+        assert_ok!(Multisig::as_multi(
+            Origin::signed(3),
+            multi,
+            Some(now()),
+            data.clone(),
+            false,
+            call_weight
+        ));
         assert_eq!(Balances::free_balance(multi), 5);
 
         assert_noop!(
-            Multisig::as_multi(Origin::signed(1), multi, None, data.clone(), false, 0),
+            Multisig::as_multi(Origin::signed(4), multi, None, data.clone(), false, 0),
             Error::<Test>::AlreadyDispatched
-        );
-    });
-}
-
-#[test]
-fn minimum_threshold_check_works() {
-    new_test_ext().execute_with(|| {
-        assert_noop!(
-            Multisig::register_multisig(Origin::signed(1), vec![2], Percent::from_parts(0)),
-            Error::<Test>::ZeroThreshold,
         );
     });
 }
@@ -1020,11 +1017,7 @@ fn minimum_threshold_check_works() {
 fn too_many_signatories_fails() {
     new_test_ext().execute_with(|| {
         assert_noop!(
-            Multisig::register_multisig(
-                Origin::signed(1),
-                vec![1, 2, 3, 4, 5],
-                Percent::from_parts(67)
-            ),
+            Multisig::register_multisig(Origin::signed(1), vec![1, 2, 3, 4, 5],),
             Error::<Test>::TooManySignatories
         );
     });
@@ -1037,7 +1030,6 @@ fn duplicate_approvals_are_ignored() {
         assert_ok!(Multisig::register_multisig(
             Origin::signed(1),
             vec![1, 2, 3],
-            Percent::from_parts(67)
         ));
 
         let call = Call::Balances(BalancesCall::transfer(6, 15)).encode();
@@ -1061,44 +1053,9 @@ fn duplicate_approvals_are_ignored() {
             0
         ));
         assert_noop!(
-            Multisig::approve_as_multi(Origin::signed(3), multi, Some(now()), hash.clone(), 0),
+            Multisig::approve_as_multi(Origin::signed(2), multi, Some(now()), hash.clone(), 0),
             Error::<Test>::AlreadyApproved,
         );
-    });
-}
-
-#[test]
-fn multisig_1_of_3_works() {
-    new_test_ext().execute_with(|| {
-        let multi = Multisig::multi_account_id(&1, 1, 0);
-        assert_ok!(Multisig::register_multisig(
-            Origin::signed(1),
-            vec![1, 2, 3],
-            Percent::from_parts(34)
-        ));
-
-        assert_ok!(Balances::transfer(Origin::signed(1), multi, 5));
-        assert_ok!(Balances::transfer(Origin::signed(2), multi, 5));
-        assert_ok!(Balances::transfer(Origin::signed(3), multi, 5));
-
-        let call = Call::Balances(BalancesCall::transfer(6, 15)).encode();
-        let hash = blake2_256(&call);
-        assert_noop!(
-            Multisig::approve_as_multi(Origin::signed(1), multi, None, hash.clone(), 0),
-            Error::<Test>::MinimumThreshold,
-        );
-        assert_noop!(
-            Multisig::as_multi(Origin::signed(1), multi, None, call.clone(), false, 0),
-            Error::<Test>::MinimumThreshold,
-        );
-        let boxed_call = Box::new(Call::Balances(BalancesCall::transfer(6, 15)));
-        assert_ok!(Multisig::as_multi_threshold_1(
-            Origin::signed(1),
-            multi,
-            boxed_call
-        ));
-
-        assert_eq!(Balances::free_balance(6), 15);
     });
 }
 
@@ -1106,15 +1063,11 @@ fn multisig_1_of_3_works() {
 fn multisig_filters() {
     new_test_ext().execute_with(|| {
         let multi = Multisig::multi_account_id(&1, 1, 0);
-        assert_ok!(Multisig::register_multisig(
-            Origin::signed(1),
-            vec![1, 2],
-            Percent::from_parts(67)
-        ));
+        assert_ok!(Multisig::register_multisig(Origin::signed(1), vec![1],));
 
         let call = Box::new(Call::System(frame_system::Call::set_code(vec![])));
-        assert_noop!(
-            Multisig::as_multi_threshold_1(Origin::signed(1), multi, call.clone()),
+        assert_err!(
+            Multisig::as_multi_threshold_1(Origin::signed(1), multi, call.clone(), now()),
             DispatchError::BadOrigin,
         );
     });
@@ -1124,11 +1077,7 @@ fn multisig_filters() {
 fn weight_check_works() {
     new_test_ext().execute_with(|| {
         let multi = Multisig::multi_account_id(&1, 1, 0);
-        assert_ok!(Multisig::register_multisig(
-            Origin::signed(1),
-            vec![1, 2, 3],
-            Percent::from_parts(67)
-        ));
+        assert_ok!(Multisig::register_multisig(Origin::signed(1), vec![1, 2],));
 
         assert_ok!(Balances::transfer(Origin::signed(1), multi, 5));
         assert_ok!(Balances::transfer(Origin::signed(2), multi, 5));
@@ -1162,7 +1111,6 @@ fn multisig_handles_no_preimage_after_all_approve() {
         assert_ok!(Multisig::register_multisig(
             Origin::signed(1),
             vec![1, 2, 3],
-            Percent::from_parts(100)
         ));
 
         assert_ok!(Balances::transfer(Origin::signed(1), multi, 5));
