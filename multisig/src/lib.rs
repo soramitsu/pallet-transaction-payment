@@ -683,7 +683,7 @@ impl<AccountId: Ord> MultisigAccount<AccountId> {
         signatories.sort();
         MultisigAccount {
             signatories,
-            threshold: Default::default(),
+            threshold: Percent::from_percent(67),
         }
     }
 }
