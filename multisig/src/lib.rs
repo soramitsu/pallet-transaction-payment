@@ -269,18 +269,19 @@ pub mod pallet {
             let result = call.dispatch(RawOrigin::Signed(id).into());
             result
                 .map(|post_dispatch_info| {
-                    post_dispatch_info
-                        .actual_weight
-                        .map(|actual_weight| {
+                    (
+                        post_dispatch_info.actual_weight.map(|actual_weight| {
                             weight_of::as_multi_threshold_1::<T>(call_len, actual_weight)
-                        })
+                        }),
+                        Pays::No,
+                    )
                         .into()
                 })
                 .map_err(|err| match err.post_info.actual_weight {
                     Some(actual_weight) => {
                         let weight_used =
                             weight_of::as_multi_threshold_1::<T>(call_len, actual_weight);
-                        let post_info = Some(weight_used).into();
+                        let post_info = (Some(weight_used), Pays::No).into();
                         let error = err.error.into();
                         DispatchErrorWithPostInfo { post_info, error }
                     }
