@@ -677,34 +677,34 @@ impl<BlockNumber: Default> Default for MultiChainHeight<BlockNumber> {
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
 pub struct Timepoint<BlockNumber> {
     /// The height of the chain at the point in time.
-    height: MultiChainHeight<BlockNumber>,
+    pub height: MultiChainHeight<BlockNumber>,
     /// The index of the extrinsic at the point in time.
-    index: u32,
+    pub index: u32,
 }
 
 /// An open multisig operation.
 #[derive(Clone, Eq, PartialEq, Encode, Decode, Default, RuntimeDebug)]
 pub struct Multisig<BlockNumber, Balance, AccountId> {
     /// The extrinsic when the multisig operation was opened.
-    when: Timepoint<BlockNumber>,
+    pub when: Timepoint<BlockNumber>,
     /// The amount held in reserve of the `depositor`, to be returned once the operation ends.
-    deposit: Balance,
+    pub deposit: Balance,
     /// The account who opened it (i.e. the first to approve it).
-    depositor: AccountId,
+    pub depositor: AccountId,
     /// The approvals achieved so far, including the depositor. Always sorted.
-    approvals: Vec<AccountId>,
+    pub approvals: Vec<AccountId>,
 }
 
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
 #[derive(Clone, Eq, PartialEq, Encode, Decode, Default, RuntimeDebug)]
 pub struct MultisigAccount<AccountId> {
     /// Parties of the account.
-    signatories: Vec<AccountId>,
+    pub signatories: Vec<AccountId>,
     /// Threshold represented in percents. Once reached,
     /// the proposal will be executed.
     ///
     /// NOTE: currently unused.
-    threshold: Percent,
+    pub threshold: Percent,
 }
 
 impl<AccountId: Ord> MultisigAccount<AccountId> {
