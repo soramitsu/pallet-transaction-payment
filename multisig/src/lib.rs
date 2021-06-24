@@ -379,7 +379,7 @@ pub mod pallet {
             .max(T::WeightInfo::as_multi_complete(s, z));
             (w, Pays::No)
         })]
-        pub(super) fn as_multi(
+        pub fn as_multi(
             origin: OriginFor<T>,
             id: T::AccountId,
             maybe_timepoint: Option<Timepoint<T::BlockNumber>>,
@@ -437,7 +437,7 @@ pub mod pallet {
         ///     - Write: Multisig Storage, [Caller Account]
         /// # </weight>
         #[pallet::weight((0, Pays::No))]
-        pub(super) fn approve_as_multi(
+        pub fn approve_as_multi(
             origin: OriginFor<T>,
             id: T::AccountId,
             maybe_timepoint: Option<Timepoint<T::BlockNumber>>,
