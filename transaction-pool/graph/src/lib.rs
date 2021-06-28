@@ -28,17 +28,18 @@
 
 mod future;
 mod listener;
+mod metrics;
 mod pool;
 mod ready;
 mod rotator;
-mod validated_pool;
 mod tracked_map;
+mod validated_pool;
 
 pub mod base_pool;
 pub mod watcher;
 
 pub use self::base_pool::Transaction;
 pub use self::pool::{
-	BlockHash, ChainApi, EventStream, ExtrinsicFor, ExtrinsicHash, IsValidator, NumberFor, Options,
-	Pool, TransactionFor, ValidatedTransaction,
+    BlockHash, ChainApi, EventStream, ExtrinsicFor, ExtrinsicHash, IsValidator, NumberFor, Options,
+    Pool, TransactionFor, ValidatedTransaction,
 };
