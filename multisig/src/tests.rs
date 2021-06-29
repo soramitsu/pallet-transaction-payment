@@ -455,9 +455,8 @@ fn multisig_2_of_2_works_with_call_storing() {
         assert_ok!(Multisig::register_multisig(Origin::signed(1), vec![1, 2],));
         assert_ok!(Balances::transfer(Origin::signed(1), multi, 5));
         assert_ok!(Balances::transfer(Origin::signed(2), multi, 5));
-        assert_ok!(Balances::transfer(Origin::signed(3), multi, 5));
 
-        let call = Call::Balances(BalancesCall::transfer(6, 15));
+        let call = Call::Balances(BalancesCall::transfer(6, 10));
         let call_weight = call.get_dispatch_info().weight;
         let data = call.encode();
         let hash = blake2_256(&data);
@@ -478,7 +477,7 @@ fn multisig_2_of_2_works_with_call_storing() {
             hash,
             call_weight
         ));
-        assert_eq!(Balances::free_balance(6), 15);
+        assert_eq!(Balances::free_balance(6), 10);
     });
 }
 
@@ -1153,5 +1152,133 @@ fn multisig_handles_no_preimage_after_all_approve() {
             call_weight
         ));
         assert_eq!(Balances::free_balance(6), 15);
+    });
+}
+
+#[test]
+fn executes_call_on_peer_remove() {
+    new_test_ext().execute_with(|| {
+        let multi = Multisig::multi_account_id(&1, 1, 0);
+        assert_ok!(Multisig::register_multisig(
+            Origin::signed(1),
+            vec![1, 2, 3],
+        ));
+
+        let call = Call::Balances(BalancesCall::transfer(6, 15)).encode();
+        let hash = blake2_256(&call);
+        let timepoint = now();
+        assert_ok!(Multisig::as_multi(
+            Origin::signed(1),
+            multi,
+            Some(timepoint),
+            call.clone(),
+            true,
+            0
+        ));
+        assert_ok!(Multisig::as_multi(
+            Origin::signed(2),
+            multi,
+            Some(timepoint),
+            call,
+            true,
+            0
+        ));
+        assert!(!crate::DispatchedCalls::<Test>::contains_key(
+            hash, timepoint
+        ));
+        assert_ok!(Multisig::remove_signatory(Origin::signed(multi), 3));
+        assert!(crate::DispatchedCalls::<Test>::contains_key(
+            hash, timepoint
+        ));
+        assert!(!crate::Multisigs::<Test>::contains_key(multi, hash));
+    });
+}
+
+#[test]
+fn executes_call_on_peer_remove_with_post_call_provision() {
+    new_test_ext().execute_with(|| {
+        let multi = Multisig::multi_account_id(&1, 1, 0);
+        assert_ok!(Multisig::register_multisig(
+            Origin::signed(1),
+            vec![1, 2, 3],
+        ));
+
+        let call1 = Call::Balances(BalancesCall::transfer(6, 15));
+        let call_weight = call1.get_dispatch_info().weight;
+        let call = call1.encode();
+        let hash = blake2_256(&call);
+        let timepoint = now();
+        assert_ok!(Multisig::as_multi(
+            Origin::signed(1),
+            multi,
+            Some(timepoint),
+            call.clone(),
+            false,
+            0
+        ));
+        assert_ok!(Multisig::as_multi(
+            Origin::signed(2),
+            multi,
+            Some(timepoint),
+            call.clone(),
+            false,
+            0
+        ));
+        assert_ok!(Multisig::remove_signatory(Origin::signed(multi), 3));
+        assert!(!crate::DispatchedCalls::<Test>::contains_key(
+            hash, timepoint
+        ));
+        assert!(crate::Multisigs::<Test>::contains_key(multi, hash));
+        assert_ok!(Multisig::as_multi(
+            Origin::signed(2),
+            multi,
+            Some(timepoint),
+            call,
+            false,
+            call_weight
+        ));
+        assert!(crate::DispatchedCalls::<Test>::contains_key(
+            hash, timepoint
+        ));
+        assert!(!crate::Multisigs::<Test>::contains_key(multi, hash));
+    });
+}
+
+#[test]
+fn does_not_execute_call_on_peer_remove() {
+    new_test_ext().execute_with(|| {
+        let multi = Multisig::multi_account_id(&1, 1, 0);
+        assert_ok!(Multisig::register_multisig(
+            Origin::signed(1),
+            vec![1, 2, 3, 4],
+        ));
+
+        let call = Call::Balances(BalancesCall::transfer(6, 15)).encode();
+        let hash = blake2_256(&call);
+        let timepoint = now();
+        assert_ok!(Multisig::as_multi(
+            Origin::signed(1),
+            multi,
+            Some(timepoint),
+            call.clone(),
+            true,
+            0
+        ));
+        assert_ok!(Multisig::as_multi(
+            Origin::signed(2),
+            multi,
+            Some(timepoint),
+            call,
+            true,
+            0
+        ));
+        assert!(!crate::DispatchedCalls::<Test>::contains_key(
+            hash, timepoint
+        ));
+        assert_ok!(Multisig::remove_signatory(Origin::signed(multi), 3));
+        assert!(!crate::DispatchedCalls::<Test>::contains_key(
+            hash, timepoint
+        ));
+        assert!(crate::Multisigs::<Test>::contains_key(multi, hash));
     });
 }

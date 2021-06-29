@@ -181,18 +181,47 @@ pub mod pallet {
                     .map_err(|_| Error::<T>::NotInSignatories)?;
                 multisig.signatories.remove(pos);
                 // remove the signatory's approvals
-                let updated_ops = Multisigs::<T>::iter_prefix(&who)
-                    .filter_map(|(k2, mut operation): (_, Multisig<_, _, _>)| {
-                        if let Ok(pos) = operation.approvals.binary_search(&signatory) {
+                let mut total_weight = Weight::zero();
+                let updated_ops = Multisigs::<T>::iter_prefix(&who).filter_map(
+                    |(call_hash, mut operation): (_, Multisig<_, _, _>)| {
+                        let timepoint = operation.when;
+                        let search_res = operation.approvals.binary_search(&signatory);
+                        if let Ok(pos) = search_res {
                             operation.approvals.remove(pos);
-                            Some((k2, operation))
+                        }
+                        let approvals = operation.approvals.len() as u16;
+                        let threshold = multisig.threshold_num();
+                        if approvals >= threshold {
+                            if !DispatchedCalls::<T>::contains_key(&call_hash, timepoint) {
+                                if let Some(call) = Self::get_call(&call_hash, None) {
+                                    total_weight += Pallet::<T>::dispatch_call(
+                                        &who,
+                                        &who,
+                                        multisig.signatories.len(),
+                                        call_hash,
+                                        1,
+                                        timepoint,
+                                        call,
+                                    )
+                                    .actual_weight
+                                    .unwrap_or(Weight::zero());
+                                    return Some((call_hash, operation, true));
+                                }
+                            }
+                        }
+                        if search_res.is_ok() {
+                            Some((call_hash, operation, false))
                         } else {
                             None
                         }
-                    })
-                    .collect::<Vec<_>>();
-                for (k2, op) in updated_ops {
-                    Multisigs::<T>::insert(&who, &k2, op);
+                    },
+                );
+                for (hash, op, dispatched) in updated_ops {
+                    if dispatched {
+                        Multisigs::<T>::remove(&who, &hash);
+                    } else {
+                        Multisigs::<T>::insert(&who, &hash, op);
+                    }
                 }
                 Ok(().into())
             })
@@ -350,7 +379,7 @@ pub mod pallet {
             .max(T::WeightInfo::as_multi_complete(s, z));
             (w, Pays::No)
         })]
-        pub(super) fn as_multi(
+        pub fn as_multi(
             origin: OriginFor<T>,
             id: T::AccountId,
             maybe_timepoint: Option<Timepoint<T::BlockNumber>>,
@@ -408,7 +437,7 @@ pub mod pallet {
         ///     - Write: Multisig Storage, [Caller Account]
         /// # </weight>
         #[pallet::weight((0, Pays::No))]
-        pub(super) fn approve_as_multi(
+        pub fn approve_as_multi(
             origin: OriginFor<T>,
             id: T::AccountId,
             maybe_timepoint: Option<Timepoint<T::BlockNumber>>,
@@ -648,34 +677,34 @@ impl<BlockNumber: Default> Default for MultiChainHeight<BlockNumber> {
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
 pub struct Timepoint<BlockNumber> {
     /// The height of the chain at the point in time.
-    height: MultiChainHeight<BlockNumber>,
+    pub height: MultiChainHeight<BlockNumber>,
     /// The index of the extrinsic at the point in time.
-    index: u32,
+    pub index: u32,
 }
 
 /// An open multisig operation.
 #[derive(Clone, Eq, PartialEq, Encode, Decode, Default, RuntimeDebug)]
 pub struct Multisig<BlockNumber, Balance, AccountId> {
     /// The extrinsic when the multisig operation was opened.
-    when: Timepoint<BlockNumber>,
+    pub when: Timepoint<BlockNumber>,
     /// The amount held in reserve of the `depositor`, to be returned once the operation ends.
-    deposit: Balance,
+    pub deposit: Balance,
     /// The account who opened it (i.e. the first to approve it).
-    depositor: AccountId,
+    pub depositor: AccountId,
     /// The approvals achieved so far, including the depositor. Always sorted.
-    approvals: Vec<AccountId>,
+    pub approvals: Vec<AccountId>,
 }
 
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
 #[derive(Clone, Eq, PartialEq, Encode, Decode, Default, RuntimeDebug)]
 pub struct MultisigAccount<AccountId> {
     /// Parties of the account.
-    signatories: Vec<AccountId>,
+    pub signatories: Vec<AccountId>,
     /// Threshold represented in percents. Once reached,
     /// the proposal will be executed.
     ///
     /// NOTE: currently unused.
-    threshold: Percent,
+    pub threshold: Percent,
 }
 
 impl<AccountId: Ord> MultisigAccount<AccountId> {
@@ -854,30 +883,17 @@ impl<T: Config> Pallet<T> {
                     call.get_dispatch_info().weight <= max_weight,
                     Error::<T>::WeightTooLow
                 );
-
-                // Clean up storage before executing call to avoid an possibility of reentrancy
-                // attack.
                 <Multisigs<T>>::remove(&id, call_hash);
-                Self::clear_call(&call_hash);
-
-                let result = call.dispatch(RawOrigin::Signed(id.clone()).into());
-                DispatchedCalls::<T>::insert(&call_hash, timepoint.clone(), ());
-                Self::deposit_event(Event::MultisigExecuted(
-                    who, timepoint, id, call_hash, result,
-                ));
-                Ok((
-                    get_result_weight(result).map(|actual_weight| {
-                        weight_of::as_multi::<T>(
-                            signatories_len,
-                            call_len,
-                            actual_weight,
-                            true, // Call is removed
-                            true, // User is refunded
-                        )
-                    }),
-                    Pays::No,
-                )
-                    .into())
+                let post_info = <Pallet<T>>::dispatch_call(
+                    &who,
+                    &id,
+                    signatories_len,
+                    call_hash,
+                    call_len,
+                    timepoint,
+                    call,
+                );
+                Ok(post_info)
             } else {
                 // We cannot dispatch the call now; either it isn't available, or it is, but we
                 // don't have threshold approvals even with our signature.
@@ -889,7 +905,7 @@ impl<T: Config> Pallet<T> {
                         &call_hash,
                         data,
                         BalanceOf::<T>::zero(),
-                    )?;
+                    );
                     true
                 } else {
                     false
@@ -930,7 +946,7 @@ impl<T: Config> Pallet<T> {
 
             // Store the call if desired.
             let stored = if let Some(data) = maybe_call.filter(|_| store) {
-                Self::store_call_and_reserve(who.clone(), &call_hash, data, deposit)?;
+                Self::store_call_and_reserve(who.clone(), &call_hash, data, deposit);
                 true
             } else {
                 false
@@ -968,6 +984,43 @@ impl<T: Config> Pallet<T> {
         }
     }
 
+    fn dispatch_call(
+        who: &T::AccountId,
+        id: &T::AccountId,
+        signatories_len: usize,
+        call_hash: [u8; 32],
+        call_len: usize,
+        timepoint: Timepoint<T::BlockNumber>,
+        call: <T as Config>::Call,
+    ) -> PostDispatchInfo {
+        // Clean up storage before executing call to avoid an possibility of reentrancy
+        // attack.
+        Self::clear_call(&call_hash);
+
+        let result = call.dispatch(RawOrigin::Signed(id.clone()).into());
+        DispatchedCalls::<T>::insert(&call_hash, timepoint.clone(), ());
+        Self::deposit_event(Event::MultisigExecuted(
+            who.clone(),
+            timepoint,
+            id.clone(),
+            call_hash,
+            result,
+        ));
+        (
+            get_result_weight(result).map(|actual_weight| {
+                weight_of::as_multi::<T>(
+                    signatories_len,
+                    call_len,
+                    actual_weight,
+                    true, // Call is removed
+                    true, // User is refunded
+                )
+            }),
+            Pays::No,
+        )
+            .into()
+    }
+
     /// Place a call's encoded data in storage, reserving funds as appropriate.
     ///
     /// We store `data` here because storing `call` would result in needing another `.encode`.
@@ -978,13 +1031,13 @@ impl<T: Config> Pallet<T> {
         hash: &[u8; 32],
         data: OpaqueCall,
         other_deposit: BalanceOf<T>,
-    ) -> DispatchResultWithPostInfo {
-        ensure!(!Calls::<T>::contains_key(hash), Error::<T>::AlreadyStored);
-        let deposit = other_deposit
-            + T::DepositBase::get()
-            + T::DepositFactor::get() * BalanceOf::<T>::from(((data.len() + 31) / 32) as u32);
-        Calls::<T>::insert(&hash, (data, who, deposit));
-        Ok(().into())
+    ) {
+        if !Calls::<T>::contains_key(hash) {
+            let deposit = other_deposit
+                + T::DepositBase::get()
+                + T::DepositFactor::get() * BalanceOf::<T>::from(((data.len() + 31) / 32) as u32);
+            Calls::<T>::insert(&hash, (data, who, deposit));
+        }
     }
 
     /// Attempt to decode and return the call, provided by the user or from storage.
