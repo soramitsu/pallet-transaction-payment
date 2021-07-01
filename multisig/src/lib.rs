@@ -55,13 +55,11 @@ pub mod weights;
 
 use frame_support::sp_runtime::DispatchError;
 use frame_support::{
-    dispatch::{
-        Decode, DispatchErrorWithPostInfo, DispatchResultWithPostInfo, Encode, PostDispatchInfo,
-    },
+    dispatch::{Decode, DispatchResultWithPostInfo, Encode, PostDispatchInfo},
     traits::{Currency, Get, ReservableCurrency},
     weights::{
         constants::{WEIGHT_PER_MICROS, WEIGHT_PER_NANOS},
-        GetDispatchInfo, Pays, Weight,
+        GetDispatchInfo, Weight,
     },
 };
 use frame_support::{ensure, Parameter, RuntimeDebug};
@@ -69,7 +67,7 @@ use frame_system::{self as system, ensure_signed, RawOrigin};
 use sp_io::hashing::blake2_256;
 use sp_runtime::{
     traits::{Dispatchable, Zero},
-    Percent,
+    DispatchResult, Percent,
 };
 #[cfg(feature = "std")]
 use sp_runtime::{Deserialize, Serialize};
@@ -85,7 +83,7 @@ pub use pallet::*;
 #[frame_support::pallet]
 pub mod pallet {
     use super::*;
-    use crate::weights::WeightInfo;
+    use crate::weights::{pays_no, pays_no_with_maybe_weight, WeightInfo};
     use frame_support::{dispatch::DispatchResultWithPostInfo, pallet_prelude::*};
     use frame_system::pallet_prelude::*;
     use sp_std::fmt::Debug;
@@ -146,7 +144,7 @@ pub mod pallet {
         /// - One event
         /// Total Complexity: O(M + logM)
         /// # <weight>
-        #[pallet::weight((0, Pays::No))]
+        #[pallet::weight(0)]
         pub fn register_multisig(
             origin: OriginFor<T>,
             signatories: Vec<T::AccountId>,
@@ -166,7 +164,7 @@ pub mod pallet {
         /// - remove items in list - O(M)
         /// Total complexity - O(M)
         /// # <weight>
-        #[pallet::weight((0, Pays::No))]
+        #[pallet::weight(0)]
         pub fn remove_signatory(
             origin: OriginFor<T>,
             signatory: T::AccountId,
@@ -194,7 +192,7 @@ pub mod pallet {
                 for (k2, op) in updated_ops {
                     Multisigs::<T>::insert(&who, &k2, op);
                 }
-                Ok(().into())
+                pays_no::<_, DispatchError>(Ok(()))
             })
         }
 
@@ -209,7 +207,7 @@ pub mod pallet {
         /// - Storage write - O(M)
         /// Total complexity - O(M)
         /// # <weight>
-        #[pallet::weight((0, Pays::No))]
+        #[pallet::weight(0)]
         pub fn add_signatory(
             origin: OriginFor<T>,
             new_member: T::AccountId,
@@ -223,7 +221,7 @@ pub mod pallet {
                 );
                 multisig.signatories.push(new_member.clone());
                 multisig.signatories.sort();
-                Ok(().into())
+                pays_no::<_, DispatchError>(Ok(()))
             })
         }
 
@@ -244,7 +242,7 @@ pub mod pallet {
         /// - DB Weight: None
         /// - Plus Call Weight
         /// # </weight>
-        #[pallet::weight((0, Pays::No))]
+        #[pallet::weight(0)]
         pub(super) fn as_multi_threshold_1(
             origin: OriginFor<T>,
             id: T::AccountId,
@@ -260,33 +258,7 @@ pub mod pallet {
             let signatories = multisig.signatories;
             ensure!(signatories.contains(&who), Error::<T>::NotInSignatories);
 
-            let (call_len, call_hash) = call.using_encoded(|c| (c.len(), blake2_256(c)));
-            ensure!(
-                !DispatchedCalls::<T>::contains_key(&call_hash, timepoint.clone()),
-                Error::<T>::AlreadyDispatched
-            );
-            DispatchedCalls::<T>::insert(&call_hash, timepoint, ());
-            let result = call.dispatch(RawOrigin::Signed(id).into());
-            result
-                .map(|post_dispatch_info| {
-                    (
-                        post_dispatch_info.actual_weight.map(|actual_weight| {
-                            weight_of::as_multi_threshold_1::<T>(call_len, actual_weight)
-                        }),
-                        Pays::No,
-                    )
-                        .into()
-                })
-                .map_err(|err| match err.post_info.actual_weight {
-                    Some(actual_weight) => {
-                        let weight_used =
-                            weight_of::as_multi_threshold_1::<T>(call_len, actual_weight);
-                        let post_info = (Some(weight_used), Pays::No).into();
-                        let error = err.error.into();
-                        DispatchErrorWithPostInfo { post_info, error }
-                    }
-                    None => err,
-                })
+            pays_no_with_maybe_weight(Self::inner_as_multi_threshold_1(id, call, timepoint))
         }
 
         /// Register approval for a dispatch to be made from a deterministic composite account if
@@ -348,7 +320,7 @@ pub mod pallet {
             .max(T::WeightInfo::as_multi_create_store(s, z))
             .max(T::WeightInfo::as_multi_approve(s, z))
             .max(T::WeightInfo::as_multi_complete(s, z));
-            (w, Pays::No)
+            w
         })]
         pub(super) fn as_multi(
             origin: OriginFor<T>,
@@ -359,12 +331,25 @@ pub mod pallet {
             max_weight: Weight,
         ) -> DispatchResultWithPostInfo {
             let who = ensure_signed(origin)?;
-            Self::operate(
-                who,
-                id,
-                maybe_timepoint,
-                CallOrHash::Call(call, store_call),
-                max_weight,
+            let multisig: MultisigAccount<T::AccountId> =
+                Self::accounts(&id).ok_or(Error::<T>::UnknownMultisigAccount)?;
+            let threshold = multisig.threshold_num();
+            ensure!(threshold > 1, Error::<T>::MinimumThreshold);
+            ensure!(
+                multisig.is_signatory(&who),
+                Error::<T>::SenderNotInSignatories
+            );
+            pays_no_with_maybe_weight(
+                Self::operate(
+                    multisig,
+                    threshold,
+                    who,
+                    id,
+                    maybe_timepoint,
+                    CallOrHash::Call(call, store_call),
+                    max_weight,
+                )
+                .map_err(|e| (None, e)),
             )
         }
 
@@ -407,7 +392,7 @@ pub mod pallet {
         ///     - Read: Multisig Storage, [Caller Account]
         ///     - Write: Multisig Storage, [Caller Account]
         /// # </weight>
-        #[pallet::weight((0, Pays::No))]
+        #[pallet::weight(0)]
         pub(super) fn approve_as_multi(
             origin: OriginFor<T>,
             id: T::AccountId,
@@ -416,12 +401,25 @@ pub mod pallet {
             max_weight: Weight,
         ) -> DispatchResultWithPostInfo {
             let who = ensure_signed(origin)?;
-            Self::operate(
-                who,
-                id,
-                maybe_timepoint,
-                CallOrHash::Hash(call_hash),
-                max_weight,
+            let multisig: MultisigAccount<T::AccountId> =
+                Self::accounts(&id).ok_or(Error::<T>::UnknownMultisigAccount)?;
+            let threshold = multisig.threshold_num();
+            ensure!(threshold > 1, Error::<T>::MinimumThreshold);
+            ensure!(
+                multisig.is_signatory(&who),
+                Error::<T>::SenderNotInSignatories
+            );
+            pays_no_with_maybe_weight(
+                Self::operate(
+                    multisig,
+                    threshold,
+                    who,
+                    id,
+                    maybe_timepoint,
+                    CallOrHash::Hash(call_hash),
+                    max_weight,
+                )
+                .map_err(|e| (None, e)),
             )
         }
 
@@ -452,7 +450,7 @@ pub mod pallet {
         ///     - Read: Multisig Storage, [Caller Account], Refund Account, Calls
         ///     - Write: Multisig Storage, [Caller Account], Refund Account, Calls
         /// # </weight>
-        #[pallet::weight((0, Pays::No))]
+        #[pallet::weight(0)]
         pub(super) fn cancel_as_multi(
             origin: OriginFor<T>,
             id: T::AccountId,
@@ -791,20 +789,14 @@ impl<T: Config> Pallet<T> {
     }
 
     fn operate(
+        multisig: MultisigAccount<T::AccountId>,
+        threshold: u16,
         who: T::AccountId,
         id: T::AccountId,
         maybe_timepoint: Option<Timepoint<T::BlockNumber>>,
         call_or_hash: CallOrHash,
         max_weight: Weight,
-    ) -> DispatchResultWithPostInfo {
-        let multisig: MultisigAccount<T::AccountId> =
-            Self::accounts(&id).ok_or(Error::<T>::UnknownMultisigAccount)?;
-        let threshold = multisig.threshold_num();
-        ensure!(threshold > 1, Error::<T>::MinimumThreshold);
-        ensure!(
-            multisig.is_signatory(&who),
-            Error::<T>::SenderNotInSignatories
-        );
+    ) -> Result<Option<Weight>, DispatchError> {
         let signatories = multisig.signatories;
         let signatories_len = signatories.len();
 
@@ -865,19 +857,15 @@ impl<T: Config> Pallet<T> {
                 Self::deposit_event(Event::MultisigExecuted(
                     who, timepoint, id, call_hash, result,
                 ));
-                Ok((
-                    get_result_weight(result).map(|actual_weight| {
-                        weight_of::as_multi::<T>(
-                            signatories_len,
-                            call_len,
-                            actual_weight,
-                            true, // Call is removed
-                            true, // User is refunded
-                        )
-                    }),
-                    Pays::No,
-                )
-                    .into())
+                Ok(get_result_weight(result).map(|actual_weight| {
+                    weight_of::as_multi::<T>(
+                        signatories_len,
+                        call_len,
+                        actual_weight,
+                        true, // Call is removed
+                        true, // User is refunded
+                    )
+                }))
             } else {
                 // We cannot dispatch the call now; either it isn't available, or it is, but we
                 // don't have threshold approvals even with our signature.
@@ -912,17 +900,13 @@ impl<T: Config> Pallet<T> {
                 }
 
                 // Call is not made, so the actual weight does not include call
-                Ok((
-                    Some(weight_of::as_multi::<T>(
-                        signatories_len,
-                        call_len,
-                        0,
-                        stored, // Call stored?
-                        false,  // No refund
-                    )),
-                    Pays::No,
-                )
-                    .into())
+                Ok(Some(weight_of::as_multi::<T>(
+                    signatories_len,
+                    call_len,
+                    0,
+                    stored, // Call stored?
+                    false,  // No refund
+                )))
             }
         } else {
             // Just start the operation by recording it in storage.
@@ -954,18 +938,35 @@ impl<T: Config> Pallet<T> {
             );
             Self::deposit_event(Event::NewMultisig(who, id, call_hash));
             // Call is not made, so we can return that weight
-            return Ok((
-                Some(weight_of::as_multi::<T>(
-                    signatories_len,
-                    call_len,
-                    0,
-                    stored, // Call stored?
-                    false,  // No refund
-                )),
-                Pays::No,
-            )
-                .into());
+            return Ok(Some(weight_of::as_multi::<T>(
+                signatories_len,
+                call_len,
+                0,
+                stored, // Call stored?
+                false,  // No refund
+            )));
         }
+    }
+
+    fn inner_as_multi_threshold_1(
+        id: T::AccountId,
+        call: Box<<T as Config>::Call>,
+        timepoint: Timepoint<T::BlockNumber>,
+    ) -> Result<Option<Weight>, (Option<Weight>, DispatchError)> {
+        let (call_len, call_hash) = call.using_encoded(|c| (c.len(), blake2_256(c)));
+        ensure!(
+            !DispatchedCalls::<T>::contains_key(&call_hash, timepoint.clone()),
+            (None, Error::<T>::AlreadyDispatched.into())
+        );
+        DispatchedCalls::<T>::insert(&call_hash, timepoint, ());
+        let result = call.dispatch(RawOrigin::Signed(id).into());
+        result
+            .map(|post_dispatch_info| {
+                post_dispatch_info.actual_weight.map(|actual_weight| {
+                    weight_of::as_multi_threshold_1::<T>(call_len, actual_weight)
+                })
+            })
+            .map_err(|err| (err.post_info.actual_weight, err.error.into()))
     }
 
     /// Place a call's encoded data in storage, reserving funds as appropriate.
@@ -978,13 +979,13 @@ impl<T: Config> Pallet<T> {
         hash: &[u8; 32],
         data: OpaqueCall,
         other_deposit: BalanceOf<T>,
-    ) -> DispatchResultWithPostInfo {
+    ) -> DispatchResult {
         ensure!(!Calls::<T>::contains_key(hash), Error::<T>::AlreadyStored);
         let deposit = other_deposit
             + T::DepositBase::get()
             + T::DepositFactor::get() * BalanceOf::<T>::from(((data.len() + 31) / 32) as u32);
         Calls::<T>::insert(&hash, (data, who, deposit));
-        Ok(().into())
+        Ok(())
     }
 
     /// Attempt to decode and return the call, provided by the user or from storage.

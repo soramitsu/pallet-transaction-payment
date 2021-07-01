@@ -121,6 +121,8 @@ construct_runtime!(
 );
 
 use crate::Call as MultisigCall;
+use frame_support::dispatch::DispatchErrorWithPostInfo;
+use frame_support::weights::Pays;
 use pallet_balances::Call as BalancesCall;
 
 pub fn new_test_ext() -> sp_io::TestExternalities {
@@ -359,6 +361,7 @@ fn already_dispatched_checking_works() {
             false,
             call_weight
         ));
+
         assert_noop!(
             Multisig::as_multi(
                 Origin::signed(4),
@@ -368,7 +371,10 @@ fn already_dispatched_checking_works() {
                 false,
                 call_weight
             ),
-            Error::<Test>::AlreadyDispatched,
+            DispatchErrorWithPostInfo {
+                error: Error::<Test>::AlreadyDispatched.into(),
+                post_info: Pays::No.into()
+            },
         );
     });
 }
@@ -390,7 +396,10 @@ fn already_dispatched_checking_works_for_threshold_1() {
         ));
         assert_noop!(
             Multisig::as_multi_threshold_1(Origin::signed(1), multi, boxed_call, timepoint.clone()),
-            Error::<Test>::AlreadyDispatched,
+            DispatchErrorWithPostInfo {
+                error: Error::<Test>::AlreadyDispatched.into(),
+                post_info: Pays::No.into()
+            }
         );
     });
 }
@@ -428,10 +437,12 @@ fn timepoint_checking_works() {
             hash,
             0
         ));
-
         assert_noop!(
             Multisig::as_multi(Origin::signed(2), multi, None, call.clone(), false, 0),
-            Error::<Test>::NoTimepoint,
+            DispatchErrorWithPostInfo {
+                error: Error::<Test>::NoTimepoint.into(),
+                post_info: Pays::No.into()
+            }
         );
         let later = Timepoint { index: 1, ..now() };
         assert_noop!(
@@ -443,7 +454,10 @@ fn timepoint_checking_works() {
                 false,
                 0
             ),
-            Error::<Test>::WrongTimepoint,
+            DispatchErrorWithPostInfo {
+                error: Error::<Test>::WrongTimepoint.into(),
+                post_info: Pays::No.into()
+            }
         );
     });
 }
@@ -1008,7 +1022,10 @@ fn multisig_3_of_4_cannot_reissue_same_call() {
 
         assert_noop!(
             Multisig::as_multi(Origin::signed(4), multi, None, data.clone(), false, 0),
-            Error::<Test>::AlreadyDispatched
+            DispatchErrorWithPostInfo {
+                error: Error::<Test>::AlreadyDispatched.into(),
+                post_info: Pays::No.into()
+            }
         );
     });
 }
@@ -1043,7 +1060,10 @@ fn duplicate_approvals_are_ignored() {
         ));
         assert_noop!(
             Multisig::approve_as_multi(Origin::signed(1), multi, Some(now()), hash.clone(), 0),
-            Error::<Test>::AlreadyApproved,
+            DispatchErrorWithPostInfo {
+                error: Error::<Test>::AlreadyApproved.into(),
+                post_info: Pays::No.into()
+            }
         );
         assert_ok!(Multisig::approve_as_multi(
             Origin::signed(2),
@@ -1054,7 +1074,10 @@ fn duplicate_approvals_are_ignored() {
         ));
         assert_noop!(
             Multisig::approve_as_multi(Origin::signed(2), multi, Some(now()), hash.clone(), 0),
-            Error::<Test>::AlreadyApproved,
+            DispatchErrorWithPostInfo {
+                error: Error::<Test>::AlreadyApproved.into(),
+                post_info: Pays::No.into()
+            }
         );
     });
 }
@@ -1068,7 +1091,10 @@ fn multisig_filters() {
         let call = Box::new(Call::System(frame_system::Call::set_code(vec![])));
         assert_err!(
             Multisig::as_multi_threshold_1(Origin::signed(1), multi, call.clone(), now()),
-            DispatchError::BadOrigin,
+            DispatchErrorWithPostInfo {
+                error: DispatchError::BadOrigin,
+                post_info: Pays::No.into()
+            }
         );
     });
 }
@@ -1097,7 +1123,10 @@ fn weight_check_works() {
 
         assert_noop!(
             Multisig::as_multi(Origin::signed(2), multi, Some(now()), data, false, 0),
-            Error::<Test>::WeightTooLow,
+            DispatchErrorWithPostInfo {
+                error: Error::<Test>::WeightTooLow.into(),
+                post_info: Pays::No.into()
+            }
         );
     });
 }
