@@ -205,7 +205,7 @@ impl<B: ChainApi> ValidatedPool<B> {
 
     /// Submit single pre-validated transaction to the pool.
     fn submit_one(&self, tx: ValidatedTransactionFor<B>) -> Result<ExtrinsicHash<B>, B::Error> {
-        match tx {
+        let hash = match tx {
             ValidatedTransaction::Valid(tx) => {
                 if !tx.propagate && !(self.is_validator.0)() {
                     return Err(error::Error::Unactionable.into());
@@ -232,8 +232,6 @@ impl<B: ChainApi> ValidatedPool<B> {
 
                 let mut listener = self.listener.write();
                 fire_events(&mut *listener, &imported);
-                self.metrics
-                    .report(|metrics| metrics.pending_transactions.inc());
                 Ok(imported.hash().clone())
             }
             ValidatedTransaction::Invalid(hash, err) => {
@@ -244,7 +242,13 @@ impl<B: ChainApi> ValidatedPool<B> {
                 self.listener.write().invalid(&hash, false);
                 Err(err.into())
             }
-        }
+        };
+        self.metrics.report(|metrics| {
+            metrics
+                .pending_transactions
+                .set(self.ready().count() as i64)
+        });
+        hash
     }
 
     fn enforce_limits(&self) -> HashSet<ExtrinsicHash<B>> {
@@ -297,12 +301,10 @@ impl<B: ChainApi> ValidatedPool<B> {
         &self,
         tx: ValidatedTransactionFor<B>,
     ) -> Result<Watcher<ExtrinsicHash<B>, ExtrinsicHash<B>>, B::Error> {
-        match tx {
+        let watcher = match tx {
             ValidatedTransaction::Valid(tx) => {
                 let hash = self.api.hash_and_length(&tx.data).0;
                 let watcher = self.listener.write().create_watcher(hash);
-                self.metrics
-                    .report(|metrics| metrics.pending_transactions.inc());
                 self.submit(std::iter::once(ValidatedTransaction::Valid(tx)))
                     .pop()
                     .expect("One extrinsic passed; one result returned; qed")
@@ -313,7 +315,13 @@ impl<B: ChainApi> ValidatedPool<B> {
                 Err(err.into())
             }
             ValidatedTransaction::Unknown(_, err) => Err(err.into()),
-        }
+        };
+        self.metrics.report(|metrics| {
+            metrics
+                .pending_transactions
+                .set(self.ready().count() as i64)
+        });
+        watcher
     }
 
     /// Resubmits revalidated transactions back to the pool.
@@ -642,8 +650,11 @@ impl<B: ChainApi> ValidatedPool<B> {
         for tx in &invalid {
             listener.invalid(&tx.hash, true);
         }
-        self.metrics
-            .report(|metrics| metrics.pending_transactions.sub(invalid.len() as i64));
+        self.metrics.report(|metrics| {
+            metrics
+                .pending_transactions
+                .set(self.ready().count() as i64)
+        });
 
         invalid
     }
@@ -662,8 +673,11 @@ impl<B: ChainApi> ValidatedPool<B> {
     pub async fn on_block_finalized(&self, block_hash: BlockHash<B>) -> Result<(), B::Error> {
         log::trace!(target: "txpool", "Attempting to notify watchers of finalization for {}", block_hash);
         self.listener.write().finalized(block_hash);
-        self.metrics
-            .report(|metrics| metrics.pending_transactions.set(0));
+        self.metrics.report(|metrics| {
+            metrics
+                .pending_transactions
+                .set(self.ready().count() as i64)
+        });
         Ok(())
     }
 
