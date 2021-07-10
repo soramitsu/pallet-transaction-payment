@@ -91,7 +91,7 @@ pub mod pallet {
     use sp_std::fmt::Debug;
 
     #[pallet::pallet]
-    #[pallet::generate_store(pub(super) trait Store)]
+    #[pallet::generate_store(pub trait Store)]
     pub struct Pallet<T>(_);
 
     #[pallet::config]
@@ -245,7 +245,7 @@ pub mod pallet {
         /// - Plus Call Weight
         /// # </weight>
         #[pallet::weight((0, Pays::No))]
-        pub(super) fn as_multi_threshold_1(
+        pub fn as_multi_threshold_1(
             origin: OriginFor<T>,
             id: T::AccountId,
             call: Box<<T as Config>::Call>,
@@ -350,7 +350,7 @@ pub mod pallet {
             .max(T::WeightInfo::as_multi_complete(s, z));
             (w, Pays::No)
         })]
-        pub(super) fn as_multi(
+        pub fn as_multi(
             origin: OriginFor<T>,
             id: T::AccountId,
             maybe_timepoint: Option<Timepoint<T::BlockNumber>>,
@@ -408,7 +408,7 @@ pub mod pallet {
         ///     - Write: Multisig Storage, [Caller Account]
         /// # </weight>
         #[pallet::weight((0, Pays::No))]
-        pub(super) fn approve_as_multi(
+        pub fn approve_as_multi(
             origin: OriginFor<T>,
             id: T::AccountId,
             maybe_timepoint: Option<Timepoint<T::BlockNumber>>,
@@ -453,7 +453,7 @@ pub mod pallet {
         ///     - Write: Multisig Storage, [Caller Account], Refund Account, Calls
         /// # </weight>
         #[pallet::weight((0, Pays::No))]
-        pub(super) fn cancel_as_multi(
+        pub fn cancel_as_multi(
             origin: OriginFor<T>,
             id: T::AccountId,
             timepoint: Timepoint<T::BlockNumber>,
@@ -482,7 +482,7 @@ pub mod pallet {
 
     /// Events type.
     #[pallet::event]
-    #[pallet::generate_deposit(pub(super) fn deposit_event)]
+    #[pallet::generate_deposit(pub fn deposit_event)]
     #[pallet::metadata(T::AccountId = "AccountId", T::BlockNumber = "Balance")]
     pub enum Event<T: Config> {
         /// A new multisig created. [multisig]
